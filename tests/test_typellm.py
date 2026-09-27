@@ -1,9 +1,12 @@
+import json
+import random
 import unittest
 
 import httpx
 
 from typellm.runtime import numeric_pattern
 from typellm import (
+    GenerationTimeout,
     SGLangClient,
     SGLangError,
     SchemaError,
@@ -909,3 +912,47 @@ class JsonSchemaExecutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostedApiTests(unittest.TestCase):
+    def client(self, handler, **options):
+        client = TypeLLMClient(api_key="k", **options)
+        client._transport = httpx.MockTransport(handler)
+        return client
+
+    def test_a_call_is_one_request_to_the_hosted_api(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json={
+                "id": "gen_1", "model": "typellm-latest", "result": {"total": 12.5},
+                "thinking": {"total": "The receipt says 12.50."},
+                "usage": {"input_tokens": 40, "thinking_tokens": 9}, "elapsed": 0.5,
+            })
+
+        client = self.client(handler, seed=7)
+        questions = {"total": {"type": "number", "thinking": True}}
+        image = "data:image/png;base64,iVBORw0KGgo="
+        result = client.generate(context="Total: 12.50", questions=questions, images=[image], timeout=90)
+
+        self.assertEqual(result, {"total": 12.5})
+        [request] = seen
+        self.assertEqual(str(request.url), "https://api.typellm.ai/v1/generate")
+        self.assertEqual(request.headers["authorization"], "Bearer k")
+        self.assertEqual(json.loads(request.content), {
+            "context": "Total: 12.50", "questions": questions, "images": [image], "timeout": 90,
+            # Each call draws its seed from the client's seeded stream.
+            "options": {"mode": "argmax", "temperature": 1.0, "seed": random.Random(7).randrange(2**32)},
+        })
+        self.assertEqual((client.last_usage.input_tokens, client.last_usage.thinking_tokens), (40, 9))
+        self.assertEqual(client.last_thinking, {"total": "The receipt says 12.50."})
+
+    def test_api_errors_keep_their_status(self):
+        for status, error in ((401, SGLangError), (429, SGLangError), (504, GenerationTimeout)):
+            client = self.client(lambda request: httpx.Response(status, json={"error": {"message": "no"}}))
+            with self.assertRaises(error) as caught:
+                client.generate(context="x", questions={"a": {"type": "boolean"}})
+            self.assertEqual(caught.exception.status, status)
+        with self.assertRaises(ValueError):  # only local compilation takes a raw schema
+            client.generate(context="x", schema={"type": "object", "properties": {"a": {"type": "boolean"}}})
