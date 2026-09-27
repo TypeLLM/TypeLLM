@@ -910,9 +910,6 @@ class JsonSchemaExecutionTests(unittest.TestCase):
         self.assertEqual(scored[0][0], {65: -0.1, 66: -2.0})
         self.assertEqual(scored[1][0], {65: -3.0, 66: -0.2})
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class HostedApiTests(unittest.TestCase):
     def client(self, handler, **options):
@@ -986,6 +983,19 @@ class HostedApiTests(unittest.TestCase):
                          [300, 90, 180])
         self.assertEqual(TypeLLMClient().sglang.timeout, 120)
 
+    def test_hosted_rejects_invalid_timeouts_before_sending(self):
+        sent = []
+        client = self.client(lambda request: sent.append(request))
+        questions = {"a": {"type": "boolean"}}
+
+        for timeout in (0, -1, True, "5", float("nan")):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                client.generate(context="x", questions=questions, timeout=timeout)
+        with self.assertRaises(ValueError):
+            self.client(lambda request: sent.append(request), timeout=0).generate(
+                context="x", questions=questions)
+        self.assertEqual(sent, [])
+
     def test_api_errors_keep_their_status(self):
         for status, error in ((401, SGLangError), (429, SGLangError), (504, GenerationTimeout)):
             client = self.client(lambda request: httpx.Response(status, json={"error": {"message": "no"}}))
@@ -994,3 +1004,24 @@ class HostedApiTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, status)
         with self.assertRaises(ValueError):  # only local compilation takes a raw schema
             client.generate(context="x", schema={"type": "object", "properties": {"a": {"type": "boolean"}}})
+
+    def test_hosted_compile_schema_requires_own_server(self):
+        client = TypeLLMClient(api_key="k")
+        with self.assertRaisesRegex(ValueError, "compile_schema needs your own server"):
+            client.compile_schema({"type": "object", "properties": {"a": {"type": "boolean"}}})
+
+    def test_hosted_invalid_responses_fail_clearly(self):
+        questions = {"a": {"type": "boolean"}}
+        client = TypeLLMClient(api_key="k")
+        for response in (httpx.Response(200, text="not JSON"),
+                         httpx.Response(200, json={"result": {"a": True}}),
+                         httpx.Response(302, headers={"Location": "/elsewhere"})):
+            with self.subTest(status=response.status_code):
+                client._transport = httpx.MockTransport(lambda request: response)
+                with self.assertRaises(SGLangError) as caught:
+                    client.generate(context="x", questions=questions)
+                self.assertEqual(caught.exception.status, response.status_code)
+
+
+if __name__ == "__main__":
+    unittest.main()

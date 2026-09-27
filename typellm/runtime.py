@@ -144,7 +144,7 @@ class Choice:
 
 
 class TypeLLMClient:
-    """Compile ordered schemas into constrained single-token decisions."""
+    """Generate typed answers with local SGLang or the hosted API."""
 
     DEFAULT_LABEL_POOL = tuple(ascii_uppercase + digits)
 
@@ -167,10 +167,10 @@ class TypeLLMClient:
         """Run on your own SGLang server, by default http://127.0.0.1:30000.
 
         With api_key, calls go to the hosted API instead, by default
-        https://api.typellm.ai. It compiles and runs the schema itself, so only
-        mode, temperature, seed and timeout apply; model picks one of its models,
-        its default when None. A hosted timeout set here is the default for
-        generate() calls; without one, the service uses its own default.
+        https://api.typellm.ai. It compiles and runs the schema itself. Model
+        chooses one of its models; mode, temperature, seed and timeout apply.
+        A hosted timeout set here is the default for generate() calls; without
+        one, the service uses its own default.
         """
         _validate_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
@@ -236,7 +236,8 @@ class TypeLLMClient:
     def last_usage(self) -> Usage | None:
         """Requests and tokens of the last generate() call made in this thread or task.
 
-        Set even when the call raised, so partial work is still counted.
+        Local calls set this even when they raise, so partial work is counted.
+        Hosted success responses set input_tokens and thinking_tokens.
         """
         return self._last_usage.get()
 
@@ -263,6 +264,8 @@ class TypeLLMClient:
 
     def compile_schema(self, schema: Mapping[str, Any]) -> list[Choice]:
         """Compile standard JSON Schema or the original ordered-list format."""
+        if self.api_key is not None:
+            raise ValueError("compile_schema needs your own server when using api_key")
         if not isinstance(schema, Mapping):
             raise SchemaError("schema must be a mapping")
         if schema.get("type", "object") != "object":
@@ -390,9 +393,10 @@ class TypeLLMClient:
         A seed fixes this call's own random choices and leaves the client's shared
         stream alone; without one, calls share that stream. The server's numerics
         can still vary with its cache and batching, so a seed does not guarantee
-        identical results. timeout caps the whole call in seconds and
-        raises GenerationTimeout; setting cancel raises GenerationCancelled.
-        Both stop the call before its next request to SGLang.
+        identical results. timeout caps the call and raises GenerationTimeout.
+        In local mode, setting cancel raises GenerationCancelled; timeout and
+        cancel stop the call before its next request to SGLang. Hosted mode
+        sends timeout to the service and does not support cancel.
         """
         self._last_usage.set(None)
         self._last_thinking.set({})
@@ -467,7 +471,11 @@ class TypeLLMClient:
     def _generate_hosted(self, context: str, questions: Mapping[str, Any], images: Sequence[str],
                          mode: str, temperature: float, seed: int | None,
                          timeout: float | None) -> dict[str, Any]:
-        """One POST /v1/generate. Errors raise SGLangError with the HTTP status."""
+        """One POST /v1/generate. HTTP errors carry their status in SGLangError."""
+        active_timeout = self.timeout if timeout is None else timeout
+        if active_timeout is not None and (type(active_timeout) not in (int, float) or
+                                           not active_timeout > 0):
+            raise ValueError("timeout must be a positive number of seconds or None")
         options: dict[str, Any] = {
             "mode": mode,
             # Without a seed, calls draw theirs from the client's stream, as locally.
@@ -483,7 +491,6 @@ class TypeLLMClient:
         }
         if self.model is not None:
             body["model"] = self.model
-        active_timeout = self.timeout if timeout is None else timeout
         if active_timeout is not None:
             body["timeout"] = active_timeout  # the service's own default (60 s) otherwise
         try:
@@ -496,16 +503,23 @@ class TypeLLMClient:
                                               else DEFAULT_SOCKET_TIMEOUT) + 60)
         except httpx.HTTPError as exc:
             raise SGLangError(f"Could not reach the TypeLLM API at {self.base_url}: {exc!r}") from exc
-        if response.status_code >= 400:
+        if response.status_code != 200:
             error = GenerationTimeout if response.status_code == 504 else SGLangError
             raise error(f"TypeLLM API returned HTTP {response.status_code}: {response.text}",
                         status=response.status_code)
-        data = response.json()
-        usage = data["usage"]
-        self._last_usage.set(Usage(input_tokens=usage["input_tokens"],
-                                   thinking_tokens=usage["thinking_tokens"]))
-        self._last_thinking.set(data.get("thinking") or {})
-        return data["result"]
+        try:
+            data = response.json()
+            usage = data["usage"]
+            result = data["result"]
+            thinking = data.get("thinking") or {}
+            input_tokens = usage["input_tokens"]
+            thinking_tokens = usage["thinking_tokens"]
+        except (ValueError, TypeError, KeyError) as exc:
+            raise SGLangError("TypeLLM API returned an invalid response",
+                              status=response.status_code) from exc
+        self._last_usage.set(Usage(input_tokens=input_tokens, thinking_tokens=thinking_tokens))
+        self._last_thinking.set(thinking)
+        return result
 
 
 def candidate_softmax(

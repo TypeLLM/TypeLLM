@@ -64,10 +64,10 @@ client = TypeLLMClient(api_key="YOUR_API_KEY")  # calls https://api.typellm.ai
 
 `generate()` then works as in the example below, with these differences:
 
-- The service compiles and runs the schema, so of the client options only
-  `mode`, `temperature`, `seed` and `timeout` apply. A call runs for at most
-  300 seconds, 60 by default. Set `timeout` on the client for a new default,
-  or on `generate()` to override it for one call.
+- The service compiles and runs the schema. Use `model`, `mode`, `temperature`
+  (for sampling), `seed` and `timeout`; local compilation settings do not apply.
+  A call runs for at most 300 seconds, 60 by default. Set `timeout` on the
+  client for a new default, or on `generate()` to override it for one call.
 - Pass `questions`; `schema=`, `cancel` and `print_final_prompt` need your
   own server. Images can be files, bytes, PIL images or data: URIs, not URLs.
 - Each key runs a limited number of calls at once, told with the key. Calls
@@ -76,6 +76,8 @@ client = TypeLLMClient(api_key="YOUR_API_KEY")  # calls https://api.typellm.ai
   that runs out of time raises `GenerationTimeout`. The service caps the
   context size and the images, answering 400 past them, and stops string
   answers at 128 tokens (`maxLength` is refused).
+- Successful calls set `last_usage` from the service's input and thinking token
+  counts. Failed hosted calls may not return usage.
 
 To run on your own GPU instead, start here:
 
