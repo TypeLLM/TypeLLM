@@ -72,8 +72,9 @@ client = TypeLLMClient(api_key="YOUR_API_KEY")  # calls https://api.typellm.ai
 - Each key runs a limited number of calls at once, told with the key. Calls
   beyond it fail right away with HTTP 429.
 - Errors raise `SGLangError` with the HTTP status in `.status`, and a call
-  that runs out of time raises `GenerationTimeout`. The service limits the
-  context size, the images and string answers, and answers 400 past them.
+  that runs out of time raises `GenerationTimeout`. The service caps the
+  context size and the images, answering 400 past them, and stops string
+  answers at 128 tokens (`maxLength` is refused).
 
 To run on your own GPU instead, start here:
 
