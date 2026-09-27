@@ -480,10 +480,11 @@ class TypeLLMClient:
             body["timeout"] = timeout  # the service's own default (60 s) otherwise
         try:
             with httpx.Client(transport=self._transport) as http:
-                # The service times the call itself; the margin covers queueing and upload.
+                # The service times the call itself. The margin covers its queue, image
+                # scaling and the grace it gives its own workers past the timeout.
                 response = http.post(self.base_url + "/v1/generate", json=body,
                                      headers={"Authorization": f"Bearer {self.api_key}"},
-                                     timeout=(self.timeout if timeout is None else timeout) + 30)
+                                     timeout=(self.timeout if timeout is None else timeout) + 60)
         except httpx.HTTPError as exc:
             raise SGLangError(f"Could not reach the TypeLLM API at {self.base_url}: {exc!r}") from exc
         if response.status_code >= 400:
