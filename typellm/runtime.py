@@ -30,6 +30,7 @@ from .sglang import GenerationTimeout, SGLangClient, SGLangError, Usage, call_sc
 
 LOG = logging.getLogger("typellm")
 HOSTED_URL = "https://api.typellm.ai"
+DEFAULT_SOCKET_TIMEOUT = 120.0
 
 
 def _closed_answer(decision: "Choice", value_json: str) -> str:
@@ -156,7 +157,7 @@ class TypeLLMClient:
         mode: str = "argmax",
         temperature: float = 1.0,
         seed: int | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = None,
         label_pool: Sequence[str] | None = None,
         numeric_max_digits: int = 32,
         tokenizer: str | None = None,
@@ -168,7 +169,8 @@ class TypeLLMClient:
         With api_key, calls go to the hosted API instead, by default
         https://api.typellm.ai. It compiles and runs the schema itself, so only
         mode, temperature, seed and timeout apply; model picks one of its models,
-        its default when None.
+        its default when None. A hosted timeout set here is the default for
+        generate() calls; without one, the service uses its own default.
         """
         _validate_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
@@ -178,7 +180,7 @@ class TypeLLMClient:
             self.sglang = SGLangClient(
                 base_url or "http://127.0.0.1:30000",
                 model,
-                timeout,
+                DEFAULT_SOCKET_TIMEOUT if timeout is None else timeout,
                 tokenizer=tokenizer,
                 thinking_budget=thinking_budget,
                 text_max_tokens=text_max_tokens,
@@ -466,25 +468,32 @@ class TypeLLMClient:
                          mode: str, temperature: float, seed: int | None,
                          timeout: float | None) -> dict[str, Any]:
         """One POST /v1/generate. Errors raise SGLangError with the HTTP status."""
+        options: dict[str, Any] = {
+            "mode": mode,
+            # Without a seed, calls draw theirs from the client's stream, as locally.
+            "seed": self.rng.randrange(2**32) if seed is None else seed,
+        }
+        if mode == "sample":
+            options["temperature"] = temperature
         body: dict[str, Any] = {
             "context": context,
             "questions": questions,
             "images": list(images),
-            # Without a seed, calls draw theirs from the client's stream, as locally.
-            "options": {"mode": mode, "temperature": temperature,
-                        "seed": self.rng.randrange(2**32) if seed is None else seed},
+            "options": options,
         }
         if self.model is not None:
             body["model"] = self.model
-        if timeout is not None:
-            body["timeout"] = timeout  # the service's own default (60 s) otherwise
+        active_timeout = self.timeout if timeout is None else timeout
+        if active_timeout is not None:
+            body["timeout"] = active_timeout  # the service's own default (60 s) otherwise
         try:
             with httpx.Client(transport=self._transport) as http:
                 # The service times the call itself. The margin covers its queue, image
                 # scaling and the grace it gives its own workers past the timeout.
                 response = http.post(self.base_url + "/v1/generate", json=body,
                                      headers={"Authorization": f"Bearer {self.api_key}"},
-                                     timeout=(self.timeout if timeout is None else timeout) + 60)
+                                     timeout=(active_timeout if active_timeout is not None
+                                              else DEFAULT_SOCKET_TIMEOUT) + 60)
         except httpx.HTTPError as exc:
             raise SGLangError(f"Could not reach the TypeLLM API at {self.base_url}: {exc!r}") from exc
         if response.status_code >= 400:

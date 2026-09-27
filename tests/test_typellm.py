@@ -943,10 +943,48 @@ class HostedApiTests(unittest.TestCase):
         self.assertEqual(json.loads(request.content), {
             "context": "Total: 12.50", "questions": questions, "images": [image], "timeout": 90,
             # Each call draws its seed from the client's seeded stream.
-            "options": {"mode": "argmax", "temperature": 1.0, "seed": random.Random(7).randrange(2**32)},
+            "options": {"mode": "argmax", "seed": random.Random(7).randrange(2**32)},
         })
         self.assertEqual((client.last_usage.input_tokens, client.last_usage.thinking_tokens), (40, 9))
         self.assertEqual(client.last_thinking, {"total": "The receipt says 12.50."})
+
+    def test_hosted_temperature_only_applies_to_sampling(self):
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={
+                "result": {"a": True}, "usage": {"input_tokens": 1, "thinking_tokens": 0},
+            })
+
+        self.client(handler, temperature=0).generate(
+            context="x", questions={"a": {"type": "boolean"}})
+        self.client(handler, mode="sample", temperature=0.7).generate(
+            context="x", questions={"a": {"type": "boolean"}})
+
+        self.assertNotIn("temperature", bodies[0]["options"])
+        self.assertEqual(bodies[1]["options"]["temperature"], 0.7)
+
+    def test_constructor_timeout_sets_hosted_limit_with_per_call_override(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json={
+                "result": {"a": True}, "usage": {"input_tokens": 1, "thinking_tokens": 0},
+            })
+
+        questions = {"a": {"type": "boolean"}}
+        client = self.client(handler, timeout=240)
+        client.generate(context="x", questions=questions)
+        client.generate(context="x", questions=questions, timeout=30)
+        self.client(handler).generate(context="x", questions=questions)
+
+        self.assertEqual([json.loads(request.content).get("timeout") for request in seen],
+                         [240, 30, None])
+        self.assertEqual([request.extensions["timeout"]["read"] for request in seen],
+                         [300, 90, 180])
+        self.assertEqual(TypeLLMClient().sglang.timeout, 120)
 
     def test_api_errors_keep_their_status(self):
         for status, error in ((401, SGLangError), (429, SGLangError), (504, GenerationTimeout)):

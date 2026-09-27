@@ -66,7 +66,8 @@ client = TypeLLMClient(api_key="YOUR_API_KEY")  # calls https://api.typellm.ai
 
 - The service compiles and runs the schema, so of the client options only
   `mode`, `temperature`, `seed` and `timeout` apply. A call runs for at most
-  300 seconds, 60 when it sets no `timeout`.
+  300 seconds, 60 by default. Set `timeout` on the client for a new default,
+  or on `generate()` to override it for one call.
 - Pass `questions`; `schema=`, `cancel` and `print_final_prompt` need your
   own server. Images can be files, bytes, PIL images or data: URIs, not URLs.
 - Each key runs a limited number of calls at once, told with the key. Calls
