@@ -439,10 +439,12 @@ call consumed no tokens. The current gateway does not include usage in its
 public error responses.
 
 For HTTP 400 `invalid_request` responses, the client checks whether its schema
-validator can identify the error and raises the same exception as a local call
-(`SchemaError` or `NotImplementedError`). The HTTP status remains on `.status`,
-and the original `SGLangError` is kept as the exception's cause. Successful
-hosted calls are not validated again, so they can use newer service features.
+validator reproduces the service's error message. If so, it raises the same
+exception as a local call (`SchemaError` or `NotImplementedError`). The HTTP
+status remains on `.status`, and the original `SGLangError` is kept as the
+exception's cause. If the messages differ, the client preserves the service's
+error. Successful hosted calls are not validated again, so they can use newer
+service features.
 Other HTTP failures remain `SGLangError`; HTTP 504 raises `GenerationTimeout`.
 A local timeout or cancel stops the call before its next SGLang request.
 

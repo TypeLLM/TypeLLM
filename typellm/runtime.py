@@ -492,12 +492,14 @@ class TypeLLMClient:
         if response.status_code != 200:
             usage = None
             error_type = None
+            error_message = None
             try:
                 data = response.json()
                 if isinstance(data, dict):
                     details = data.get("error")
                     if isinstance(details, dict):
                         error_type = details.get("type")
+                        error_message = details.get("message")
                     if data.get("usage") is not None:
                         usage = _hosted_usage(data["usage"])
             except (ValueError, TypeError):
@@ -508,13 +510,17 @@ class TypeLLMClient:
             # Older services use invalid_request for all schema/value errors. Verify
             # a schema error locally only after that rejection; a successful request
             # must remain compatible with newer service-side schema features.
-            if response.status_code == 400 and error_type == "invalid_request":
+            if (response.status_code == 400 and error_type == "invalid_request"
+                    and isinstance(error_message, str)):
                 try:
                     compile_json_schema({"type": "object", "properties": questions})
                 except (SchemaError, ValueError, NotImplementedError) as exc:
-                    setattr(exc, "status", response.status_code)
-                    setattr(exc, "usage", usage)
-                    raise exc from error
+                    # Hosted normalization and newer schema features can make the
+                    # local compiler fail for a different reason than the service.
+                    if str(exc) == error_message:
+                        setattr(exc, "status", response.status_code)
+                        setattr(exc, "usage", usage)
+                        raise exc from error
                 except Exception:
                     pass  # A diagnostic failure must preserve the original API error.
             raise error

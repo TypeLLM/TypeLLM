@@ -122,6 +122,61 @@ class HostedContractTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, status)
             self.assertIsNone(caught.exception.usage)
 
+    def test_hosted_schema_differences_do_not_mask_the_rejected_field(self):
+        # The gateway normalizes boolean permutations; newer services may also
+        # accept types that this client's schema compiler does not recognize.
+        accepted_fields = [
+            {"type": "string", "enum": ["calm", "tense"], "permutations": value}
+            for value in (True, False)
+        ] + [{"type": "a_future_type"}]
+        message = "enum values for 'count' do not match type 'integer'"
+        for accepted in accepted_fields:
+            questions = {"tone": accepted, "count": {"type": "integer", "enum": ["wrong"]}}
+            response = httpx.Response(400, json={
+                "error": {"type": "invalid_request", "message": message},
+                "usage": {"input_tokens": 0, "thinking_tokens": 0},
+            })
+            with self.subTest(accepted=accepted):
+                with self.assertRaises(SGLangError) as caught:
+                    self.client(response).generate(context="x", questions=questions)
+                self.assertIn(message, str(caught.exception))
+                self.assertEqual(caught.exception.status, 400)
+                usage = caught.exception.usage
+                assert usage is not None
+                self.assertEqual(usage.input_tokens, 0)
+                self.assertEqual(usage.thinking_tokens, 0)
+
+    def test_request_option_errors_are_not_replaced_by_schema_diagnostics(self):
+        questions = {"tone": {
+            "type": "string", "enum": ["calm", "tense"], "permutations": True,
+        }}
+        message = "options.seed: Input should be a valid integer"
+        response = httpx.Response(400, json={
+            "error": {"type": "invalid_request", "message": message},
+        })
+        with self.assertRaises(SGLangError) as caught:
+            self.client(response).generate(
+                context="x", questions=questions, seed="wrong",  # type: ignore[arg-type]
+            )
+        self.assertIn(message, str(caught.exception))
+        self.assertEqual(caught.exception.status, 400)
+        self.assertIsNone(caught.exception.usage)
+
+    def test_schema_recovery_requires_a_matching_service_message(self):
+        questions = {"q": {"type": "integer", "enum": ["wrong"]}}
+        errors = [{"type": "invalid_request"}] + [
+            {"type": "invalid_request", "message": message}
+            for message in (None, 123, [], {}, "a different request error")
+        ]
+        for error in errors:
+            response = httpx.Response(400, json={"error": error})
+            with self.subTest(error=error):
+                with self.assertRaises(SGLangError) as caught:
+                    self.client(response).generate(context="x", questions=questions)
+                self.assertIn(response.text, str(caught.exception))
+                self.assertEqual(caught.exception.status, 400)
+                self.assertIsNone(caught.exception.usage)
+
     def test_schema_diagnostic_failure_preserves_the_api_error(self):
         response = httpx.Response(400, json={"error": {"type": "invalid_request", "message": "refused"}})
         with patch("typellm.runtime.compile_json_schema", side_effect=TypeError("unsupported shape")):
