@@ -80,10 +80,15 @@ class MeteredServer(SlowServer):
     def __init__(self, fail_after=None):
         super().__init__()
         self.fail_after = fail_after
+        self._generate_lock = threading.Lock()
+        self._generate_count = 0
 
     def _request(self, path, payload=None, *, allow_text=False):
-        if path == "/generate" and self.fail_after is not None and len(self.payloads) >= self.fail_after:
-            raise SGLangError("SGLang went away")
+        if path == "/generate":
+            with self._generate_lock:
+                if self.fail_after is not None and self._generate_count >= self.fail_after:
+                    raise SGLangError("SGLang went away")
+                self._generate_count += 1
         response = super()._request(path, payload, allow_text=allow_text)
         if path == "/generate":
             for item in response if isinstance(response, list) else [response]:
@@ -152,7 +157,9 @@ class DeadlineTests(unittest.TestCase):
         class Slower(MeteredServer):
             def _request(self, path, payload=None, *, allow_text=False):
                 if path == "/generate":
-                    time.sleep(0.03)
+                    # Longer than the remaining budget after warm-up so the
+                    # overlapped open/score phase's scope.check() fires.
+                    time.sleep(0.04)
                 return super()._request(path, payload, allow_text=allow_text)
 
         client = TypeLLMClient(model="fake")
@@ -160,8 +167,9 @@ class DeadlineTests(unittest.TestCase):
         client.generate(context="Receipt", questions=self.QUESTIONS).result
         needed = len(client.sglang.payloads)
         client.sglang.payloads.clear()
+        client.sglang._generate_count = 0
         with self.assertRaises(GenerationTimeout) as caught:
-            client.generate(context="Receipt", questions=self.QUESTIONS, timeout=0.05)
+            client.generate(context="Receipt", questions=self.QUESTIONS, timeout=0.03)
         self.assertLess(len(client.sglang.payloads), needed)
         self.assertEqual(caught.exception.usage.requests, len(client.sglang.payloads))
 
@@ -171,7 +179,9 @@ class DeadlineTests(unittest.TestCase):
         class Cancelling(MeteredServer):
             def _request(self, path, payload=None, *, allow_text=False):
                 response = super()._request(path, payload, allow_text=allow_text)
-                if path == "/generate" and len(self.payloads) == 2:
+                # Cancel after the shared-prefix warm-up so the overlapped
+                # open/score phase sees the event before starting.
+                if path == "/generate" and len(self.payloads) == 1:
                     cancel.set()
                 return response
 
@@ -179,7 +189,7 @@ class DeadlineTests(unittest.TestCase):
         client.sglang = Cancelling()
         with self.assertRaises(GenerationCancelled):
             client.generate(context="Receipt", questions=self.QUESTIONS, cancel=cancel).result
-        self.assertEqual(len(client.sglang.payloads), 2)
+        self.assertEqual(len(client.sglang.payloads), 1)
 
     def test_socket_timeouts_never_outlast_the_call(self):
         seen = []

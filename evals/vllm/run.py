@@ -168,7 +168,7 @@ def run_correctness(args, client):
             "confidence": result["confidence"] in {0.0, 0.25, 0.5, 0.75, 1.0},
         }
         assert all(checks.values()), checks
-        return {"result": result, "checks": checks, "usage": response.usage.__dict__}
+        return {"result": result, "checks": checks, "usage": response.usage.as_dict()}
 
     cases.append(case("C1_receipt_five_types", c1))
 
@@ -286,7 +286,7 @@ def run_correctness(args, client):
         return {
             "result": response.result,
             "thinking_chars": len(response.thinking["policy_ok"]),
-            "usage": response.usage.__dict__,
+            "usage": response.usage.as_dict(),
         }
 
     cases.append(case("C8_thinking", c8))
@@ -304,7 +304,7 @@ def run_correctness(args, client):
             },
         )
         assert isinstance(response.result["policy_ok"], bool)
-        return {"result": response.result, "usage": response.usage.__dict__}
+        return {"result": response.result, "usage": response.usage.as_dict()}
 
     cases.append(case("C9_forced_close", c9))
 
@@ -320,7 +320,7 @@ def run_correctness(args, client):
         result = response.result
         assert abs(float(result["total"]) - 12.5) < 0.1, result
         assert result["paid"] is True, result
-        return {"result": result, "usage": response.usage.__dict__}
+        return {"result": result, "usage": response.usage.as_dict()}
 
     cases.append(case("C10_image", c10))
 
@@ -454,7 +454,7 @@ def run_correctness(args, client):
             "seed_repeat_equal": a == b,
             "timeout": timed_out,
             "cancel": cancelled,
-            "usage": usage.__dict__,
+            "usage": usage.as_dict(),
         }
 
     cases.append(case("C13_serving_features", c13))
@@ -473,7 +473,7 @@ def run_correctness(args, client):
         return {
             "first_cached": first.usage.cached_tokens,
             "second_cached": second.usage.cached_tokens,
-            "usage": second.usage.__dict__,
+            "usage": second.usage.as_dict(),
         }
 
     cases.append(case("C14_prefix_reuse", c14))
@@ -571,6 +571,179 @@ def percentile(values, p):
     if low == high:
         return ordered[low]
     return ordered[low] * (high - rank) + ordered[high] * (rank - low)
+
+
+def summarize_latencies_ms(values):
+    if not values:
+        return {}
+    ms = [v * 1000 for v in values]
+    return {
+        "n": len(ms),
+        "mean": round(statistics.mean(ms), 1),
+        "p50": round(percentile(ms, 0.5), 1),
+        "p95": round(percentile(ms, 0.95), 1),
+        "min": round(min(ms), 1),
+        "max": round(max(ms), 1),
+    }
+
+
+def raw_completion_floor(args, prompt: str, *, max_tokens: int = 1) -> float:
+    """One raw /v1/completions call; the same-server Jev-style floor."""
+    root = args.url.rstrip("/")
+    if not root.endswith("/v1"):
+        root = root + "/v1"
+    body = {
+        "model": args.model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": 0,
+    }
+    start = time.perf_counter()
+    with httpx.Client(timeout=args.timeout) as http:
+        response = http.post(root + "/completions", json=body)
+        response.raise_for_status()
+        response.json()
+    return time.perf_counter() - start
+
+
+def run_absolute_latency(args, client):
+    """Per-decision and whole-schema latency vs a raw vLLM forward-pass floor."""
+    wanted = {c.strip() for c in args.contexts.split(",") if c.strip()}
+    contexts = {
+        "short": RECEIPT,
+        "long": long_context(RECEIPT, 6000),
+    }
+    contexts = {k: v for k, v in contexts.items() if k in wanted}
+    warmups = args.warmups
+    measured = args.runs
+    cold = args.cold
+    report = {}
+
+    configs = [
+        (
+            "A1_boolean",
+            {"reimbursable": RECEIPT_Q["reimbursable"]},
+            lambda r: r.get("reimbursable") is True,
+            1,
+        ),
+        (
+            "A2_enum",
+            {"expense_type": RECEIPT_Q["expense_type"]},
+            lambda r: r.get("expense_type") == "travel",
+            1,
+        ),
+        (
+            "A3_enum_probabilities",
+            {
+                "expense_type": {
+                    **RECEIPT_Q["expense_type"],
+                    "return_probabilities": True,
+                }
+            },
+            lambda r: (
+                isinstance(r.get("expense_type"), dict)
+                and r["expense_type"].get("value") == "travel"
+            ),
+            1,
+        ),
+        (
+            "A4_whole_schema",
+            RECEIPT_Q,
+            lambda r: (
+                "Hilton" in str(r.get("merchant", ""))
+                and abs(float(r.get("total", 0)) - 324.5) < 0.5
+                and r.get("expense_type") == "travel"
+            ),
+            32,  # longest open field decode budget as the floor
+        ),
+    ]
+
+    for ctx_name, context in contexts.items():
+        report[ctx_name] = {}
+        # Shared rendered prompt for the single-decision floor.
+        floor_prompt = client.sglang.render_chat(
+            [{"role": "user", "content": context}],
+            add_generation_prompt=True,
+            thinking=False,
+        )
+        for config_name, questions, check, floor_tokens in configs:
+            print(f"\n== absolute {ctx_name}/{config_name}")
+            latencies = []
+            cold_latencies = []
+            floor_latencies = []
+            cold_floor = []
+            accuracies = []
+
+            def one_typellm(nonce=None):
+                ctx = context if nonce is None else f"nonce={nonce}\n{context}"
+                response, seconds = timed(
+                    lambda: client.generate(context=ctx, questions=questions)
+                )
+                return seconds, check(response.result), response.result
+
+            def one_floor(nonce=None, max_tokens=floor_tokens):
+                prompt = floor_prompt if nonce is None else (
+                    client.sglang.render_chat(
+                        [{"role": "user", "content": f"nonce={nonce}\n{context}"}],
+                        add_generation_prompt=True,
+                        thinking=False,
+                    )
+                )
+                return raw_completion_floor(args, prompt, max_tokens=max_tokens)
+
+            for _ in range(warmups):
+                try:
+                    one_typellm()
+                    one_floor()
+                except Exception as exc:
+                    print(f"   warmup failed: {exc}")
+
+            for i in range(measured):
+                try:
+                    seconds, correct, _ = one_typellm()
+                    floor_s = one_floor()
+                    latencies.append(seconds)
+                    floor_latencies.append(floor_s)
+                    accuracies.append(correct)
+                    print(
+                        f"   run {i + 1}/{measured}: typellm={seconds * 1000:.1f}ms "
+                        f"floor={floor_s * 1000:.1f}ms correct={correct}"
+                    )
+                except Exception as exc:
+                    print(f"   run {i + 1}/{measured} FAIL: {exc}")
+                    accuracies.append(False)
+
+            for i in range(cold):
+                try:
+                    nonce = uuid.uuid4().hex
+                    seconds, correct, _ = one_typellm(nonce=nonce)
+                    floor_s = one_floor(nonce=nonce)
+                    cold_latencies.append(seconds)
+                    cold_floor.append(floor_s)
+                    print(
+                        f"   cold {i + 1}/{cold}: typellm={seconds * 1000:.1f}ms "
+                        f"floor={floor_s * 1000:.1f}ms"
+                    )
+                except Exception as exc:
+                    print(f"   cold {i + 1}/{cold} FAIL: {exc}")
+
+            typellm_ms = summarize_latencies_ms(latencies)
+            floor_ms = summarize_latencies_ms(floor_latencies)
+            overhead = None
+            ratio = None
+            if typellm_ms and floor_ms and floor_ms.get("mean"):
+                overhead = round(typellm_ms["mean"] - floor_ms["mean"], 1)
+                ratio = round(typellm_ms["mean"] / floor_ms["mean"], 2)
+            report[ctx_name][config_name] = {
+                "typellm_ms": typellm_ms,
+                "floor_ms": floor_ms,
+                "cold_typellm_ms": summarize_latencies_ms(cold_latencies),
+                "cold_floor_ms": summarize_latencies_ms(cold_floor),
+                "overhead_ms": overhead,
+                "ratio": ratio,
+                "accuracy_rate": round(sum(accuracies) / max(len(accuracies), 1), 3),
+            }
+    return report
 
 
 def summarize_latencies(values):
@@ -699,6 +872,16 @@ def run_speed(args, client):
     return report
 
 
+def _pct_faster(baseline: float | None, measured: float | None) -> str:
+    """Return e.g. '55.5% faster' or '12.3% slower' when both means exist."""
+    if not baseline or not measured or baseline <= 0:
+        return "-"
+    change = (baseline - measured) / baseline * 100
+    if change >= 0:
+        return f"{change:.1f}% faster"
+    return f"{-change:.1f}% slower"
+
+
 def write_report(path: Path, payload: dict):
     cases = payload["correctness"]
     passed = sum(1 for c in cases if c.get("ok"))
@@ -720,6 +903,48 @@ def write_report(path: Path, payload: dict):
         json.dumps(payload.get("environment", {}), indent=2),
         "```",
         "",
+        "## Glossary: correctness cases",
+        "",
+        "Each `C*` row is one live call against the vLLM server. "
+        "Example context used in several cases:",
+        "",
+        "```text",
+        "Receipt from Hilton London",
+        "Total: £324.50",
+        "Employee travelled to London for a client meeting.",
+        "```",
+        "",
+        "| Case | What it checks | Example |",
+        "|---|---|---|",
+        "| `C1_receipt_five_types` | One schema with string, number, enum, boolean, and numeric enum together. | "
+        '`merchant="Hilton London"`, `total=324.5`, `expense_type="travel"`, `reimbursable=true`, `confidence` in `{0,0.25,0.5,0.75,1}`. |',
+        "| `C2_return_probabilities` | An enum field returns a full probability vector over labels. | "
+        '`expense_type` → `{value, probabilities:{meal, travel, equipment}}` summing to 1. |',
+        "| `C3_numbers` | Open integer and number decoding under a regex grammar. | "
+        '`"What is 17.5 × 4?"` → `70.0`; letter count → an `int`. |',
+        "| `C4_nullable` | Fields that may return JSON `null`. | "
+        "Receipt with no tip → `tip=null`, table may be `\"7A\"` or `null`. |",
+        "| `C5_text_max_length` | Free-text field capped by `maxLength`. | "
+        "Summary string of at most 20 characters. |",
+        "| `C6_depends_on` | Dependency DAG: later fields see earlier answers. | "
+        '`system` first, then `severity` / `deployment_related` depend on it, then `rollback`. |',
+        "| `C7_permutations_auto` | Enum option-order bias reduced by balanced orderings. | "
+        "Fair-die enum `one`…`six` with `permutations=\"auto\"` and returned probabilities. |",
+        "| `C8_thinking` | Per-field reasoning before the typed answer. | "
+        '`policy_ok` with `thinking=True`, budget 1024; reasoning appears in `response.thinking`. |',
+        "| `C9_forced_close` | Thinking stopped at a small budget, then constrained answer. | "
+        "Same boolean with `thinking_budget=32`. |",
+        "| `C10_image` | Vision: synthetic receipt image + text questions. | "
+        "Image shows `TOTAL $12.50` and `PAID` → `total≈12.5`, `paid=true`. |",
+        "| `C11_image_thinking` | Vision field that thinks before answering. | "
+        "`paid` boolean on the same image with a thinking budget. |",
+        "| `C12_real_receipt_photo` | Real photo DAG (subset when full run is skipped). | "
+        "Restaurant receipt photo; fields like `total`, `subtotal`, `discount`. |",
+        "| `C13_serving_features` | Concurrency, seed, timeout, cancel, usage. | "
+        "Eight parallel bool calls; `timeout=0.001` raises; cancel event aborts. |",
+        "| `C14_prefix_reuse` | Long shared context reuses the KV prefix cache. | "
+        "~6k-token context; second field shows `cached_tokens ≥ 784`. |",
+        "",
         "## Correctness cases",
         "",
         "| Case | Pass | Seconds | Notes |",
@@ -733,7 +958,43 @@ def write_report(path: Path, payload: dict):
             f"| {row['name']} | {'yes' if row.get('ok') else 'no'} | "
             f"{row.get('seconds') if row.get('seconds') is not None else '-'} | {note} |"
         )
-    lines.extend(["", "## Speed comparison", ""])
+
+    lines.extend(
+        [
+            "",
+            "## Glossary: speed configs",
+            "",
+            "All speed configs extract the same five receipt fields "
+            "(`merchant`, `total`, `expense_type`, `reimbursable`, `confidence`).",
+            "",
+            "| Config | Path | What happens | Example output shape |",
+            "|---|---|---|---|",
+            "| `B1_normal_json` | One `/v1/chat/completions` call | "
+            "Ask the LLM in plain English to return a JSON object; parse the text. | "
+            '`{"merchant":"Hilton London","total":324.5,...}` as free text. |',
+            "| `B2_normal_thinking` | One chat call with thinking on | "
+            "Same as B1, but the model reasons first (`enable_thinking`). | "
+            "Long reasoning, then the JSON object. |",
+            "| `B3_native_structured` | One chat call with `response_format` | "
+            "vLLM constrained JSON Schema for the whole object in one decode. | "
+            "Guaranteed JSON object matching the schema. |",
+            "| `T1_typellm` | TypeLLM multi-field generate | "
+            "Enum/bool scored with one output token each; text/number decoded under grammar; "
+            "independent open fields and scoring overlap. | "
+            "Typed dict, e.g. `expense_type=\"travel\"`, `reimbursable=True`. |",
+            "| `T2_typellm_thinking` | TypeLLM with per-field thinking | "
+            "Every field reasons (budget 1024) before its constrained answer. | "
+            "Same typed dict plus per-field `thinking` traces. |",
+            "",
+            "- **short** context: the short Hilton receipt (~100 tokens).",
+            "- **long** context: the same receipt padded to ~6k tokens.",
+            "- **valid**: schema-shaped answer; **accuracy**: merchant/total/expense_type match labels.",
+            "- **cold**: first request after a unique nonce so the prefix cache cannot help.",
+            "",
+            "## Speed comparison",
+            "",
+        ]
+    )
     speed = payload.get("speed") or {}
     for ctx_name, configs in speed.items():
         lines.append(f"### Context: {ctx_name}")
@@ -751,12 +1012,117 @@ def write_report(path: Path, payload: dict):
                 f"{stats.get('schema_valid_rate', '-')} | {stats.get('accuracy_rate', '-')} |"
             )
         lines.append("")
+
+    absolute = payload.get("absolute") or {}
+    if absolute:
+        lines.extend(
+            [
+                "## Glossary: absolute latency configs",
+                "",
+                "Each row times TypeLLM against a **floor**: one raw "
+                "`/v1/completions` call on the same server (stand-in for a "
+                "single forward pass / Jev-style absolute latency). "
+                "Proprietary Jev is not available in this repository.",
+                "",
+                "| Config | TypeLLM call | Floor | Example |",
+                "|---|---|---|---|",
+                "| `A1_boolean` | One boolean field | `max_tokens=1` on the rendered context | "
+                '`reimbursable` → `true` / `false`. |',
+                "| `A2_enum` | One 3-way enum | `max_tokens=1` | "
+                '`expense_type` ∈ `{meal, travel, equipment}`. |',
+                "| `A3_enum_probabilities` | One enum with `return_probabilities` | `max_tokens=1` | "
+                "Same enum plus a probability for each label. |",
+                "| `A4_whole_schema` | Full 5-field receipt schema | "
+                "`max_tokens=32` (longest open-field decode budget) | "
+                "All five receipt fields in one TypeLLM `generate()`. |",
+                "",
+                "- **TypeLLM ms**: end-to-end client latency.",
+                "- **floor ms**: raw completions latency on the same hardware.",
+                "- **overhead ms**: TypeLLM − floor (negative means TypeLLM was faster).",
+                "- **ratio**: TypeLLM / floor (1.0 = equal to the floor).",
+                "",
+                "## Absolute latency (Jev-style)",
+                "",
+                "Milliseconds vs a same-server raw `/v1/completions` floor "
+                "(one forward pass). Jev itself is not benchmarked here.",
+                "",
+            ]
+        )
+        for ctx_name, configs in absolute.items():
+            lines.append(f"### Context: {ctx_name}")
+            lines.append("")
+            lines.append(
+                "| Config | TypeLLM ms | floor ms | overhead ms | ratio | "
+                "cold TypeLLM ms | accuracy |"
+            )
+            lines.append("|---|---:|---:|---:|---:|---:|---:|")
+            for name, stats in configs.items():
+                t = stats.get("typellm_ms") or {}
+                f = stats.get("floor_ms") or {}
+                c = stats.get("cold_typellm_ms") or {}
+                lines.append(
+                    f"| {name} | {t.get('mean', '-')} | {f.get('mean', '-')} | "
+                    f"{stats.get('overhead_ms', '-')} | {stats.get('ratio', '-')} | "
+                    f"{c.get('mean', '-')} | {stats.get('accuracy_rate', '-')} |"
+                )
+            lines.append("")
+
+    # ---- Gains summary (percentages vs normal LLM paths) ----
+    lines.extend(["## Gains vs normal LLM", ""])
+    if speed:
+        lines.append(
+            "Latency improvement of TypeLLM (`T1`) over normal chat paths "
+            "on the same 5-field receipt schema. "
+            "Positive % = TypeLLM is faster."
+        )
+        lines.append("")
+        lines.append(
+            "| Context | vs `B1_normal_json` | vs `B3_native_structured` | "
+            "T1 mean s | B1 mean s | B3 mean s |"
+        )
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for ctx_name, configs in speed.items():
+            t1 = (configs.get("T1_typellm") or {}).get("latency") or {}
+            b1 = (configs.get("B1_normal_json") or {}).get("latency") or {}
+            b3 = (configs.get("B3_native_structured") or {}).get("latency") or {}
+            t1m, b1m, b3m = t1.get("mean"), b1.get("mean"), b3.get("mean")
+            lines.append(
+                f"| {ctx_name} | {_pct_faster(b1m, t1m)} | {_pct_faster(b3m, t1m)} | "
+                f"{t1m if t1m is not None else '-'} | "
+                f"{b1m if b1m is not None else '-'} | "
+                f"{b3m if b3m is not None else '-'} |"
+            )
+        lines.append("")
+    if absolute:
+        lines.append(
+            "Absolute stage: TypeLLM vs the raw same-server floor "
+            "(how close a typed decision is to one forward pass)."
+        )
+        lines.append("")
+        lines.append(
+            "| Context | Config | vs floor | TypeLLM ms | floor ms | ratio |"
+        )
+        lines.append("|---|---|---:|---:|---:|---:|")
+        for ctx_name, configs in absolute.items():
+            for name, stats in configs.items():
+                t = (stats.get("typellm_ms") or {}).get("mean")
+                f = (stats.get("floor_ms") or {}).get("mean")
+                lines.append(
+                    f"| {ctx_name} | {name} | {_pct_faster(f, t)} | "
+                    f"{t if t is not None else '-'} | "
+                    f"{f if f is not None else '-'} | "
+                    f"{stats.get('ratio', '-')} |"
+                )
+        lines.append("")
+
     lines.extend(
         [
             "## Analysis notes",
             "",
             "- TypeLLM enum/boolean fields use one scored output token each; free JSON chat writes a full object.",
-            "- Hybrid Qwen3.8 prefix cache uses large blocks (784 tokens here), so short contexts show little reuse.",
+            "- Hybrid Qwen3.8 prefix cache uses large blocks (probed at warmup); short contexts skip the shared-prefix warm-up so a single decision is one round trip.",
+            "- Independent open fields and finite scoring run concurrently on text-only layers.",
+            "- Absolute latency compares each config to a raw same-server `/v1/completions` floor; single decisions sit near that floor, and multi-field schemas can beat a long decode floor by overlapping work.",
             "- Thinking adds tokens and latency on both paths; TypeLLM can enable it per field.",
             "- Native structured output (B3) is a single chat call with `response_format`; TypeLLM still scores fields separately and returns calibrated label probabilities.",
             "",
@@ -764,7 +1130,7 @@ def write_report(path: Path, payload: dict):
             "",
             "- `--reasoning-parser qwen3` holds regex constraints until `</think>` is closed; TypeLLM always closes thinking first.",
             "- `flush_cache` requires `VLLM_SERVER_DEV_MODE=1`.",
-            "- Absolute Jev latency is out of scope; this report compares TypeLLM-on-vLLM with normal vLLM calls on the same server.",
+            "- Absolute latency compares TypeLLM to a raw same-server `/v1/completions` floor; proprietary Jev is not available in this repository.",
             "",
         ]
     )
@@ -781,6 +1147,8 @@ def main():
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--cold", type=int, default=2)
     parser.add_argument("--skip-speed", action="store_true")
+    parser.add_argument("--skip-absolute", action="store_true",
+                        help="Skip the Jev-style absolute latency stage")
     parser.add_argument("--skip-c12", action="store_true",
                         help="Skip the multi-minute real-receipt photo case")
     parser.add_argument("--contexts", default="short,long",
@@ -802,6 +1170,7 @@ def main():
 
     correctness = run_correctness(args, client)
     speed = {} if args.skip_speed else run_speed(args, client)
+    absolute = {} if args.skip_absolute else run_absolute_latency(args, client)
 
     payload = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -814,9 +1183,13 @@ def main():
             "runs": args.runs,
             "warmups": args.warmups,
             "cold": args.cold,
+            "prefix_cache_block_tokens": getattr(
+                client.sglang, "prefix_cache_block_tokens", None
+            ),
         },
         "correctness": correctness,
         "speed": speed,
+        "absolute": absolute,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

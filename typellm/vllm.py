@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from typing import Any, Mapping, Sequence
@@ -22,6 +24,7 @@ from .sglang import (
     SGLangClient,
     SGLangError,
     _call_scope,
+    extract_candidate_logprobs,
 )
 
 LOG = logging.getLogger("typellm")
@@ -49,6 +52,7 @@ class VLLMClient(SGLangClient):
         thinking_budget: int | None = None,
         text_max_tokens: int = 128,
         answer_reserve_tokens: int = 64,
+        prefix_cache_block_tokens: int | None = None,
     ) -> None:
         root = base_url.rstrip("/")
         if root.endswith("/v1"):
@@ -68,6 +72,17 @@ class VLLMClient(SGLangClient):
         self._capabilities_lock = threading.Lock()
         self._image_render_cache: dict[tuple[str, ...], Mapping[str, Any]] | None = None
         self._models_cache: Mapping[str, Any] | None = None
+        # None: probe once; an override skips the network probe.
+        if prefix_cache_block_tokens is not None:
+            if type(prefix_cache_block_tokens) is not int or prefix_cache_block_tokens <= 0:
+                raise ValueError("prefix_cache_block_tokens must be a positive integer")
+            self._prefix_cache_block_tokens = prefix_cache_block_tokens
+            self._prefix_cache_block_probed = True
+        else:
+            self._prefix_cache_block_tokens = 1
+            self._prefix_cache_block_probed = False
+        self._list_prompt_scoring = False
+        self._list_prompt_scoring_checked = False
 
     def close(self) -> None:
         with self._pool_lock:
@@ -199,12 +214,21 @@ class VLLMClient(SGLangClient):
 
     # ---------------------------------------------------------- capabilities
 
+    @property
+    def prefix_cache_block_tokens(self) -> int:
+        if not self._prefix_cache_block_probed:
+            self._ensure_capabilities()
+        return self._prefix_cache_block_tokens
+
     def _ensure_capabilities(self) -> None:
         with self._capabilities_lock:
             if self._capabilities_checked:
                 return
             self._probe_logprob_token_ids()
             self._probe_structured_outputs()
+            if not self._prefix_cache_block_probed:
+                self._probe_prefix_cache_block()
+            self._probe_list_prompt_scoring()
             self._capabilities_checked = True
 
     def _probe_logprob_token_ids(self) -> None:
@@ -259,6 +283,101 @@ class VLLMClient(SGLangClient):
                 "and that --reasoning-parser is compatible with constrained decoding."
             )
 
+    def _probe_prefix_cache_block(self) -> None:
+        """Infer the prefix-cache block size from two cache-hit measurements."""
+        model = self._tokenizer_model()
+        tokenizer = self._get_chat_tokenizer()
+        cached_counts: list[int] = []
+        # Build prompts by token count: repeated characters compress heavily
+        # under BPE, so a character length is not a token length.
+        for target in (900, 1800):
+            alphabet = "abcdefghijklmnopqrstuvwxyz0123456789 .,;!?"
+            # Grow in chunks; BPE compresses repeated characters.
+            prompt = ""
+            while len(tokenizer.encode(prompt, add_special_tokens=False)) < target:
+                start = len(prompt)
+                prompt += "".join(
+                    alphabet[(start + i) % len(alphabet)] for i in range(256)
+                )
+            body = {
+                "model": model,
+                "prompt": prompt,
+                "max_tokens": 1,
+                "temperature": 0,
+            }
+            self._request("/v1/completions", body)
+            second = self._request("/v1/completions", body)
+            usage = second.get("usage") if isinstance(second, Mapping) else None
+            details = (
+                usage.get("prompt_tokens_details")
+                if isinstance(usage, Mapping)
+                else None
+            )
+            cached = (
+                details.get("cached_tokens")
+                if isinstance(details, Mapping)
+                else None
+            )
+            if type(cached) is int and cached > 0:
+                cached_counts.append(cached)
+        if len(cached_counts) >= 2:
+            block = math.gcd(cached_counts[0], cached_counts[1])
+            if block > 0:
+                self._prefix_cache_block_tokens = block
+                self._prefix_cache_block_probed = True
+                LOG.info("vllm_prefix_cache_block_tokens=%s", block)
+                return
+        if cached_counts:
+            block = cached_counts[0]
+            if block > 0:
+                self._prefix_cache_block_tokens = block
+                self._prefix_cache_block_probed = True
+                LOG.info("vllm_prefix_cache_block_tokens=%s (single probe)", block)
+                return
+        # Prefix caching may be off; keep the conservative default of 1.
+        self._prefix_cache_block_probed = True
+        LOG.info("vllm_prefix_cache_block_tokens=1 (no cache hits during probe)")
+
+    def _probe_list_prompt_scoring(self) -> None:
+        """Check whether /v1/completions accepts a list of prompts for scoring."""
+        ids = [self.single_token("A")[0], self.single_token("B")[0]]
+        try:
+            response = self._request(
+                "/v1/completions",
+                {
+                    "model": self._tokenizer_model(),
+                    "prompt": ["Answer A or B: ", "Pick A or B: "],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                    "logprobs": 1,
+                    "logprob_token_ids": ids,
+                    "return_tokens_as_token_ids": True,
+                },
+            )
+        except SGLangError as exc:
+            LOG.info("vllm_list_prompt_scoring=False (%s)", exc)
+            self._list_prompt_scoring = False
+            self._list_prompt_scoring_checked = True
+            return
+        choices = response.get("choices") if isinstance(response, Mapping) else None
+        if not isinstance(choices, list) or len(choices) != 2:
+            self._list_prompt_scoring = False
+            self._list_prompt_scoring_checked = True
+            return
+        try:
+            for choice in choices:
+                if not isinstance(choice, Mapping):
+                    raise VLLMError("list-prompt choice is not an object")
+                self._extract_top_logprobs(choice, ids)
+        except VLLMError as exc:
+            LOG.info("vllm_list_prompt_scoring=False (%s)", exc)
+            self._list_prompt_scoring = False
+            self._list_prompt_scoring_checked = True
+            return
+        self._list_prompt_scoring = True
+        self._list_prompt_scoring_checked = True
+        LOG.info("vllm_list_prompt_scoring=True")
+
     # -------------------------------------------------------------- generate
 
     def _generate(self, payload: Mapping[str, Any]) -> Any:
@@ -293,6 +412,102 @@ class VLLMClient(SGLangClient):
                 }
                 self._measure_images(scope, measure_payload, response)
         return response
+
+    def score_candidates_batch(
+        self,
+        prefixes: Sequence[str],
+        candidate_ids: Sequence[Sequence[int]],
+    ) -> tuple[list[tuple[dict[int, float], Mapping[str, Any]]], float]:
+        """Score candidates; use one list-prompt request when the server supports it."""
+        if not prefixes:
+            return [], 0.0
+        if len(prefixes) != len(candidate_ids):
+            raise ValueError("prefixes and candidate_ids must have the same length")
+        self._ensure_capabilities()
+        if len(prefixes) == 1 or not self._list_prompt_scoring:
+            return super().score_candidates_batch(prefixes, candidate_ids)
+        # Union of all candidates: logprobs come from the full vocabulary
+        # log-softmax, so each field still reads only its own IDs.
+        union_ids = list(dict.fromkeys(token_id for row in candidate_ids for token_id in row))
+        body = {
+            "model": self._tokenizer_model(),
+            "prompt": list(prefixes),
+            "max_tokens": 1,
+            "temperature": 0,
+            "logprobs": 1,
+            "logprob_token_ids": union_ids,
+            "return_tokens_as_token_ids": True,
+        }
+        start = time.perf_counter()
+        response = self._request("/v1/completions", body)
+        elapsed = time.perf_counter() - start
+        choices = response.get("choices") if isinstance(response, Mapping) else None
+        if not isinstance(choices, list) or len(choices) != len(prefixes):
+            LOG.info(
+                "vllm_list_prompt_scoring fallback: expected %s choices, got %s",
+                len(prefixes),
+                len(choices) if isinstance(choices, list) else type(choices).__name__,
+            )
+            return super().score_candidates_batch(prefixes, candidate_ids)
+        usage = response.get("usage") if isinstance(response, Mapping) else {}
+        details = usage.get("prompt_tokens_details") if isinstance(usage, Mapping) else None
+        cached = 0
+        if isinstance(details, Mapping) and type(details.get("cached_tokens")) is int:
+            cached = details["cached_tokens"]
+        prompt_tokens = usage.get("prompt_tokens", 0) if isinstance(usage, Mapping) else 0
+        completion_tokens = (
+            usage.get("completion_tokens", 0) if isinstance(usage, Mapping) else 0
+        )
+        # Attribute usage once for the whole batch so call-scope accounting
+        # matches a single server request.
+        scope = _call_scope.get()
+        mapped_batch = []
+        for choice, ids in zip(choices, candidate_ids):
+            if not isinstance(choice, Mapping):
+                raise VLLMError("list-prompt choice is not an object")
+            text = choice.get("text")
+            if not isinstance(text, str):
+                raise VLLMError("list-prompt choice has no text")
+            finish = choice.get("finish_reason")
+            finish_type = "length" if finish == "length" else "stop"
+            if finish in {"abort", "error"}:
+                finish_type = "abort"
+            mapped = {
+                "text": text,
+                "meta_info": {
+                    "finish_reason": {
+                        "type": finish_type,
+                        "matched": choice.get("stop_reason"),
+                    },
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cached_tokens": cached,
+                    "output_token_ids_logprobs": [
+                        self._extract_top_logprobs(choice, ids)
+                    ],
+                },
+            }
+            mapped_batch.append(mapped)
+        if scope is not None:
+            # Count as one request with per-choice meta already summed above
+            # would double-count; add a single aggregate response instead.
+            scope.usage._add(
+                {
+                    "meta_info": {
+                        "prompt_tokens": prompt_tokens if type(prompt_tokens) is int else 0,
+                        "completion_tokens": (
+                            completion_tokens if type(completion_tokens) is int else 0
+                        ),
+                        "cached_tokens": cached,
+                    }
+                }
+            )
+        results: list[tuple[dict[int, float], Mapping[str, Any]]] = []
+        for item, ids in zip(mapped_batch, candidate_ids):
+            scores = extract_candidate_logprobs(item, ids)
+            meta = item.get("meta_info", {})
+            results.append((scores, meta if isinstance(meta, Mapping) else {}))
+        return results, elapsed
 
     def _generate_completions(self, payload: Mapping[str, Any]) -> Any:
         texts = payload["text"]

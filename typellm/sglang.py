@@ -53,16 +53,40 @@ class Usage:
     thinking_tokens: int = 0
     input_tokens: int = 0
 
+    def __post_init__(self) -> None:
+        # Not a dataclass field so usage dumps stay JSON-serializable.
+        object.__setattr__(self, "_lock", threading.Lock())
+
     def _add(self, response: Any) -> None:
-        self.requests += 1
-        for item in response if isinstance(response, list) else [response]:
-            meta = item.get("meta_info") if isinstance(item, Mapping) else None
-            if not isinstance(meta, Mapping):
-                continue
-            for name in ("prompt_tokens", "cached_tokens", "completion_tokens"):
-                value = meta.get(name)
-                if type(value) is int:
-                    setattr(self, name, getattr(self, name) + value)
+        # Open-field and scoring requests can finish on different threads.
+        with self._lock:
+            self.requests += 1
+            for item in response if isinstance(response, list) else [response]:
+                meta = item.get("meta_info") if isinstance(item, Mapping) else None
+                if not isinstance(meta, Mapping):
+                    continue
+                for name in ("prompt_tokens", "cached_tokens", "completion_tokens"):
+                    value = meta.get(name)
+                    if type(value) is int:
+                        setattr(self, name, getattr(self, name) + value)
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "requests": self.requests,
+            "prompt_tokens": self.prompt_tokens,
+            "cached_tokens": self.cached_tokens,
+            "completion_tokens": self.completion_tokens,
+            "thinking_tokens": self.thinking_tokens,
+            "input_tokens": self.input_tokens,
+        }
+
+    def __getstate__(self) -> dict[str, Any]:
+        return self.as_dict()
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        for key, value in state.items():
+            setattr(self, key, value)
+        object.__setattr__(self, "_lock", threading.Lock())
 
 
 def _count_thinking(response: Any) -> None:
@@ -70,11 +94,12 @@ def _count_thinking(response: Any) -> None:
     scope = _call_scope.get()
     if scope is None:
         return
-    for item in response if isinstance(response, list) else [response]:
-        meta = item.get("meta_info") if isinstance(item, Mapping) else None
-        tokens = meta.get("completion_tokens") if isinstance(meta, Mapping) else None
-        if type(tokens) is int:
-            scope.usage.thinking_tokens += tokens
+    with scope.usage._lock:
+        for item in response if isinstance(response, list) else [response]:
+            meta = item.get("meta_info") if isinstance(item, Mapping) else None
+            tokens = meta.get("completion_tokens") if isinstance(meta, Mapping) else None
+            if type(tokens) is int:
+                scope.usage.thinking_tokens += tokens
 
 
 @dataclass
@@ -200,6 +225,8 @@ class SGLangClient:
         self._active_images: ContextVar[tuple[str, ...]] = ContextVar(
             f"typellm_images_{id(self)}", default=()
         )
+        # SGLang's radix cache matches at token granularity.
+        self._prefix_cache_block_tokens = 1
 
     def __getstate__(self) -> dict[str, Any]:
         # A ContextVar cannot be pickled; images belong to one call anyway.
@@ -226,6 +253,11 @@ class SGLangClient:
 
     def __exit__(self, *exc_info: Any) -> None:
         self.close()
+
+    @property
+    def prefix_cache_block_tokens(self) -> int:
+        """Smallest prefix length that can produce a KV-cache hit on this server."""
+        return self._prefix_cache_block_tokens
 
     def warmup(self) -> None:
         """Load the model info and chat tokenizer before the first request."""

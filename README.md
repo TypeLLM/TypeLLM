@@ -75,9 +75,13 @@ vllm serve Qwen/Qwen3.8-27B \
 
 Hybrid models such as Qwen3.8 use large prefix-cache blocks (often 784 tokens).
 Shared-context reuse only helps when the context is longer than one block.
-With `--reasoning-parser qwen3`, constrained decoding applies after the closed
-`</think>` block; TypeLLM always closes thinking before the typed answer.
-`flush_cache` needs `VLLM_SERVER_DEV_MODE=1` on the server.
+TypeLLM probes the block size once on warmup and skips the shared-prefix
+warm-up when the prefix is shorter than one block, so short prompts stay at
+one round trip. Pass `prefix_cache_block_tokens=` to `TypeLLMClient` to
+override the probe. With `--reasoning-parser qwen3`, constrained decoding
+applies after the closed `</think>` block; TypeLLM always closes thinking
+before the typed answer. `flush_cache` needs `VLLM_SERVER_DEV_MODE=1` on the
+server.
 
 ### 2. Run TypeLLM
 

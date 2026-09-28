@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-28T12:48:42Z",
+  "generated_at": "2026-09-28T13:49:59Z",
   "url": "http://192.168.140.40:8000/v1",
   "model": "RedHatAI/Qwen3.8-27B-INT4",
   "tokenizer": "RedHatAI/Qwen3.8-27B-INT4",
@@ -11,16 +11,16 @@
         {
           "id": "RedHatAI/Qwen3.8-27B-INT4",
           "object": "model",
-          "created": 1790599376,
+          "created": 1790603004,
           "owned_by": "vllm",
           "root": "RedHatAI/Qwen3.8-27B-INT4",
           "parent": null,
           "max_model_len": 32000,
           "permission": [
             {
-              "id": "modelperm-a317f594ea9324c1",
+              "id": "modelperm-9d7572cc98ec1a71",
               "object": "model_permission",
-              "created": 1790599376,
+              "created": 1790603004,
               "allow_create_engine": false,
               "allow_sampling": true,
               "allow_logprobs": true,
@@ -37,13 +37,14 @@
     },
     "runs": 3,
     "warmups": 1,
-    "cold": 1
+    "cold": 1,
+    "prefix_cache_block_tokens": 784
   },
   "correctness": [
     {
       "name": "C1_receipt_five_types",
       "ok": true,
-      "seconds": 2.648,
+      "seconds": 1.897,
       "result": {
         "merchant": "Hilton London",
         "total": 324.5,
@@ -59,8 +60,8 @@
         "confidence": true
       },
       "usage": {
-        "requests": 3,
-        "prompt_tokens": 491,
+        "requests": 2,
+        "prompt_tokens": 462,
         "cached_tokens": 0,
         "completion_tokens": 18,
         "thinking_tokens": 0,
@@ -70,7 +71,7 @@
     {
       "name": "C2_return_probabilities",
       "ok": true,
-      "seconds": 0.533,
+      "seconds": 0.262,
       "result": {
         "expense_type": {
           "value": "travel",
@@ -85,7 +86,7 @@
     {
       "name": "C3_numbers",
       "ok": true,
-      "seconds": 0.36,
+      "seconds": 0.342,
       "result": {
         "answer": 70.0,
         "count": 7
@@ -94,7 +95,7 @@
     {
       "name": "C4_nullable",
       "ok": true,
-      "seconds": 0.929,
+      "seconds": 0.388,
       "result": {
         "tip": null,
         "table": "7A",
@@ -105,7 +106,7 @@
     {
       "name": "C5_text_max_length",
       "ok": true,
-      "seconds": 0.34,
+      "seconds": 0.333,
       "result": {
         "summary": "Hilton London stay"
       }
@@ -113,7 +114,7 @@
     {
       "name": "C6_depends_on",
       "ok": true,
-      "seconds": 1.719,
+      "seconds": 0.905,
       "result": {
         "system": "payments",
         "severity": "high",
@@ -124,52 +125,52 @@
     {
       "name": "C7_permutations_auto",
       "ok": true,
-      "seconds": 1.278,
+      "seconds": 0.83,
       "result": {
         "roll": {
           "value": "one",
           "probabilities": {
-            "one": 0.24878627273226794,
-            "two": 0.13664360679902202,
-            "three": 0.12398600961874051,
-            "four": 0.1312042134208012,
-            "five": 0.13427715614584845,
-            "six": 0.22510274128331983
+            "one": 0.25283720233335766,
+            "two": 0.13765072799303563,
+            "three": 0.1265403670898653,
+            "four": 0.12857486331999873,
+            "five": 0.13423653191402676,
+            "six": 0.2201603073497159
           }
         }
       },
       "prob_range": [
-        0.12398600961874051,
-        0.24878627273226794
+        0.1265403670898653,
+        0.25283720233335766
       ]
     },
     {
       "name": "C8_thinking",
       "ok": true,
-      "seconds": 13.253,
+      "seconds": 6.834,
       "result": {
         "policy_ok": true
       },
-      "thinking_chars": 4399,
+      "thinking_chars": 2176,
       "usage": {
-        "requests": 3,
-        "prompt_tokens": 1322,
-        "cached_tokens": 784,
-        "completion_tokens": 1025,
-        "thinking_tokens": 1024,
+        "requests": 2,
+        "prompt_tokens": 761,
+        "cached_tokens": 0,
+        "completion_tokens": 504,
+        "thinking_tokens": 503,
         "input_tokens": 61
       }
     },
     {
       "name": "C9_forced_close",
       "ok": true,
-      "seconds": 1.199,
+      "seconds": 0.922,
       "result": {
-        "policy_ok": false
+        "policy_ok": true
       },
       "usage": {
-        "requests": 3,
-        "prompt_tokens": 330,
+        "requests": 2,
+        "prompt_tokens": 301,
         "cached_tokens": 0,
         "completion_tokens": 33,
         "thinking_tokens": 32,
@@ -179,14 +180,14 @@
     {
       "name": "C10_image",
       "ok": true,
-      "seconds": 24.589,
+      "seconds": 15.345,
       "result": {
         "total": 12.5,
         "paid": true
       },
       "usage": {
-        "requests": 3,
-        "prompt_tokens": 815,
+        "requests": 2,
+        "prompt_tokens": 579,
         "cached_tokens": 0,
         "completion_tokens": 9,
         "thinking_tokens": 0,
@@ -196,7 +197,7 @@
     {
       "name": "C11_image_thinking",
       "ok": true,
-      "seconds": 23.59,
+      "seconds": 36.509,
       "result": {
         "paid": true
       },
@@ -205,42 +206,19 @@
     {
       "name": "C12_real_receipt_photo",
       "ok": true,
-      "seconds": 321.094,
-      "result": {
-        "first_item": "ICE BLACKCOFFEE",
-        "item_lines": 3,
-        "subtotal": 194000.0,
-        "discount": 19400.0,
-        "total": 174600.0,
-        "discount_percent": 10.0,
-        "paid_in_cash": true
-      },
-      "matches": {
-        "first_item": false,
-        "item_lines": true,
-        "subtotal": true,
-        "discount": true,
-        "total": true,
-        "discount_percent": true,
-        "paid_in_cash": true
-      },
-      "score": "6/7",
-      "subset": [
-        "first_item",
-        "item_lines",
-        "subtotal",
-        "discount",
-        "total",
-        "discount_percent",
-        "paid_in_cash"
-      ],
-      "note": "Ran separately; full 14-field multimodal DAG is multi-minute on this server"
+      "seconds": 0.0,
+      "skipped": true,
+      "reason": "skipped via --skip-c12; validated separately on subset"
     },
     {
       "name": "C13_serving_features",
       "ok": true,
-      "seconds": 4.266,
+      "seconds": 10.372,
       "concurrency": [
+        true,
+        true,
+        true,
+        true,
         true,
         true,
         true,
@@ -250,19 +228,19 @@
       "timeout": true,
       "cancel": true,
       "usage": {
-        "requests": 2,
-        "prompt_tokens": 122,
+        "requests": 1,
+        "prompt_tokens": 96,
         "cached_tokens": 0,
         "completion_tokens": 1,
         "thinking_tokens": 0,
-        "input_tokens": 45
+        "input_tokens": 48
       }
     },
     {
       "name": "C14_prefix_reuse",
       "ok": true,
-      "seconds": 3.945,
-      "first_cached": 7056,
+      "seconds": 1.974,
+      "first_cached": 14112,
       "second_cached": 14112,
       "usage": {
         "requests": 2,
@@ -279,19 +257,19 @@
       "B1_normal_json": {
         "latency": {
           "n": 3,
-          "mean": 1.143,
-          "p50": 1.144,
-          "p95": 1.144,
-          "min": 1.142,
-          "max": 1.145
+          "mean": 1.144,
+          "p50": 1.149,
+          "p95": 1.152,
+          "min": 1.13,
+          "max": 1.152
         },
         "cold_latency": {
           "n": 1,
-          "mean": 1.147,
-          "p50": 1.147,
-          "p95": 1.147,
-          "min": 1.147,
-          "max": 1.147
+          "mean": 1.146,
+          "p50": 1.146,
+          "p95": 1.146,
+          "min": 1.146,
+          "max": 1.146
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
@@ -340,19 +318,19 @@
       "B2_normal_thinking": {
         "latency": {
           "n": 3,
-          "mean": 3.721,
-          "p50": 3.717,
-          "p95": 3.729,
-          "min": 3.717,
-          "max": 3.73
+          "mean": 3.704,
+          "p50": 3.704,
+          "p95": 3.705,
+          "min": 3.704,
+          "max": 3.705
         },
         "cold_latency": {
           "n": 1,
-          "mean": 5.43,
-          "p50": 5.43,
-          "p95": 5.43,
-          "min": 5.43,
-          "max": 5.43
+          "mean": 3.78,
+          "p50": 3.78,
+          "p95": 3.78,
+          "min": 3.78,
+          "max": 3.78
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
@@ -401,19 +379,19 @@
       "B3_native_structured": {
         "latency": {
           "n": 3,
-          "mean": 1.122,
-          "p50": 1.122,
-          "p95": 1.123,
-          "min": 1.121,
-          "max": 1.123
+          "mean": 1.106,
+          "p50": 1.106,
+          "p95": 1.107,
+          "min": 1.105,
+          "max": 1.107
         },
         "cold_latency": {
           "n": 1,
-          "mean": 1.127,
-          "p50": 1.127,
-          "p95": 1.127,
-          "min": 1.127,
-          "max": 1.127
+          "mean": 1.128,
+          "p50": 1.128,
+          "p95": 1.128,
+          "min": 1.128,
+          "max": 1.128
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
@@ -462,86 +440,86 @@
       "T1_typellm": {
         "latency": {
           "n": 3,
-          "mean": 1.011,
-          "p50": 1.013,
-          "p95": 1.017,
-          "min": 1.003,
-          "max": 1.018
+          "mean": 0.509,
+          "p50": 0.488,
+          "p95": 0.555,
+          "min": 0.475,
+          "max": 0.563
         },
         "cold_latency": {
           "n": 1,
-          "mean": 1.031,
-          "p50": 1.031,
-          "p95": 1.031,
-          "min": 1.031,
-          "max": 1.031
+          "mean": 0.512,
+          "p50": 0.512,
+          "p95": 0.512,
+          "min": 0.512,
+          "max": 0.512
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
         "tokens": [
           {
-            "prompt_tokens": 491,
+            "prompt_tokens": 462,
             "completion_tokens": 18,
             "cached_tokens": 0,
             "thinking_tokens": 0,
-            "requests": 3
+            "requests": 2
           },
           {
-            "prompt_tokens": 491,
+            "prompt_tokens": 462,
             "completion_tokens": 18,
             "cached_tokens": 0,
             "thinking_tokens": 0,
-            "requests": 3
+            "requests": 2
           },
           {
-            "prompt_tokens": 491,
+            "prompt_tokens": 462,
             "completion_tokens": 18,
             "cached_tokens": 0,
             "thinking_tokens": 0,
-            "requests": 3
+            "requests": 2
           }
         ]
       },
       "T2_typellm_thinking": {
         "latency": {
           "n": 3,
-          "mean": 9.347,
-          "p50": 9.836,
-          "p95": 13.795,
-          "min": 3.969,
-          "max": 14.235
+          "mean": 9.992,
+          "p50": 8.764,
+          "p95": 14.331,
+          "min": 6.262,
+          "max": 14.949
         },
         "cold_latency": {
           "n": 1,
-          "mean": 9.069,
-          "p50": 9.069,
-          "p95": 9.069,
-          "min": 9.069,
-          "max": 9.069
+          "mean": 9.467,
+          "p50": 9.467,
+          "p95": 9.467,
+          "min": 9.467,
+          "max": 9.467
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
         "tokens": [
           {
-            "prompt_tokens": 1963,
-            "completion_tokens": 645,
-            "cached_tokens": 0,
-            "thinking_tokens": 627,
-            "requests": 4
-          },
-          {
-            "prompt_tokens": 2764,
-            "completion_tokens": 1435,
+            "prompt_tokens": 3438,
+            "completion_tokens": 2138,
             "cached_tokens": 784,
-            "thinking_tokens": 1417,
-            "requests": 4
+            "thinking_tokens": 2120,
+            "requests": 3
           },
           {
-            "prompt_tokens": 2658,
-            "completion_tokens": 1340,
+            "prompt_tokens": 2194,
+            "completion_tokens": 905,
             "cached_tokens": 0,
-            "thinking_tokens": 1322,
-            "requests": 4
+            "thinking_tokens": 887,
+            "requests": 3
+          },
+          {
+            "prompt_tokens": 2351,
+            "completion_tokens": 1062,
+            "cached_tokens": 0,
+            "thinking_tokens": 1044,
+            "requests": 3
           }
         ]
       }
@@ -550,11 +528,11 @@
       "B1_normal_json": {
         "latency": {
           "n": 3,
-          "mean": 1.656,
-          "p50": 1.657,
-          "p95": 1.657,
+          "mean": 1.657,
+          "p50": 1.656,
+          "p95": 1.659,
           "min": 1.655,
-          "max": 1.657
+          "max": 1.659
         },
         "cold_latency": {
           "n": 1,
@@ -611,19 +589,19 @@
       "B2_normal_thinking": {
         "latency": {
           "n": 3,
-          "mean": 7.179,
-          "p50": 7.177,
-          "p95": 7.186,
-          "min": 7.174,
-          "max": 7.187
+          "mean": 7.181,
+          "p50": 7.181,
+          "p95": 7.184,
+          "min": 7.177,
+          "max": 7.184
         },
         "cold_latency": {
           "n": 1,
-          "mean": 8.933,
-          "p50": 8.933,
-          "p95": 8.933,
-          "min": 8.933,
-          "max": 8.933
+          "mean": 8.911,
+          "p50": 8.911,
+          "p95": 8.911,
+          "min": 8.911,
+          "max": 8.911
         },
         "schema_valid_rate": 0.0,
         "accuracy_rate": 0.0,
@@ -672,19 +650,19 @@
       "B3_native_structured": {
         "latency": {
           "n": 3,
-          "mean": 1.667,
-          "p50": 1.664,
-          "p95": 1.674,
-          "min": 1.66,
-          "max": 1.675
+          "mean": 1.664,
+          "p50": 1.663,
+          "p95": 1.67,
+          "min": 1.657,
+          "max": 1.671
         },
         "cold_latency": {
           "n": 1,
-          "mean": 3.385,
-          "p50": 3.385,
-          "p95": 3.385,
-          "min": 3.385,
-          "max": 3.385
+          "mean": 3.408,
+          "p50": 3.408,
+          "p95": 3.408,
+          "min": 3.408,
+          "max": 3.408
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
@@ -733,19 +711,19 @@
       "T1_typellm": {
         "latency": {
           "n": 3,
-          "mean": 2.007,
-          "p50": 1.951,
-          "p95": 2.233,
-          "min": 1.805,
-          "max": 2.264
+          "mean": 1.275,
+          "p50": 1.275,
+          "p95": 1.278,
+          "min": 1.273,
+          "max": 1.278
         },
         "cold_latency": {
           "n": 1,
-          "mean": 4.552,
-          "p50": 4.552,
-          "p95": 4.552,
-          "min": 4.552,
-          "max": 4.552
+          "mean": 3.473,
+          "p50": 3.473,
+          "p95": 3.473,
+          "min": 3.473,
+          "max": 3.473
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
@@ -753,21 +731,21 @@
           {
             "prompt_tokens": 43685,
             "completion_tokens": 18,
-            "cached_tokens": 42336,
+            "cached_tokens": 28224,
             "thinking_tokens": 0,
             "requests": 3
           },
           {
             "prompt_tokens": 43685,
             "completion_tokens": 18,
-            "cached_tokens": 42336,
+            "cached_tokens": 28224,
             "thinking_tokens": 0,
             "requests": 3
           },
           {
             "prompt_tokens": 43685,
             "completion_tokens": 18,
-            "cached_tokens": 42336,
+            "cached_tokens": 28224,
             "thinking_tokens": 0,
             "requests": 3
           }
@@ -776,45 +754,347 @@
       "T2_typellm_thinking": {
         "latency": {
           "n": 3,
-          "mean": 17.094,
-          "p50": 17.748,
-          "p95": 17.968,
-          "min": 15.543,
-          "max": 17.992
+          "mean": 18.2,
+          "p50": 18.201,
+          "p95": 18.247,
+          "min": 18.147,
+          "max": 18.252
         },
         "cold_latency": {
           "n": 1,
-          "mean": 20.433,
-          "p50": 20.433,
-          "p95": 20.433,
-          "min": 20.433,
-          "max": 20.433
+          "mean": 21.225,
+          "p50": 21.225,
+          "p95": 21.225,
+          "min": 21.225,
+          "max": 21.225
         },
         "schema_valid_rate": 1.0,
         "accuracy_rate": 1.0,
         "tokens": [
           {
-            "prompt_tokens": 83237,
-            "completion_tokens": 2708,
-            "cached_tokens": 79184,
-            "thinking_tokens": 2690,
+            "prompt_tokens": 83269,
+            "completion_tokens": 2740,
+            "cached_tokens": 64288,
+            "thinking_tokens": 2722,
             "requests": 4
           },
           {
-            "prompt_tokens": 83382,
-            "completion_tokens": 2853,
-            "cached_tokens": 79184,
-            "thinking_tokens": 2835,
+            "prompt_tokens": 83670,
+            "completion_tokens": 3141,
+            "cached_tokens": 64288,
+            "thinking_tokens": 3123,
             "requests": 4
           },
           {
-            "prompt_tokens": 82237,
-            "completion_tokens": 1730,
-            "cached_tokens": 78400,
-            "thinking_tokens": 1712,
+            "prompt_tokens": 82951,
+            "completion_tokens": 2422,
+            "cached_tokens": 64288,
+            "thinking_tokens": 2404,
             "requests": 4
           }
         ]
+      }
+    }
+  },
+  "absolute": {
+    "short": {
+      "A1_boolean": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 271.0,
+          "p50": 268.4,
+          "p95": 277.0,
+          "min": 266.6,
+          "max": 278.0
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 499.0,
+          "p50": 492.9,
+          "p95": 511.2,
+          "min": 490.8,
+          "max": 513.3
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 277.0,
+          "p50": 277.0,
+          "p95": 277.0,
+          "min": 277.0,
+          "max": 277.0
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 494.7,
+          "p50": 494.7,
+          "p95": 494.7,
+          "min": 494.7,
+          "max": 494.7
+        },
+        "overhead_ms": -228.0,
+        "ratio": 0.54,
+        "accuracy_rate": 1.0
+      },
+      "A2_enum": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 271.9,
+          "p50": 270.9,
+          "p95": 274.3,
+          "min": 270.2,
+          "max": 274.7
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 500.8,
+          "p50": 493.2,
+          "p95": 514.6,
+          "min": 492.3,
+          "max": 516.9
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 277.3,
+          "p50": 277.3,
+          "p95": 277.3,
+          "min": 277.3,
+          "max": 277.3
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 492.1,
+          "p50": 492.1,
+          "p95": 492.1,
+          "min": 492.1,
+          "max": 492.1
+        },
+        "overhead_ms": -228.9,
+        "ratio": 0.54,
+        "accuracy_rate": 1.0
+      },
+      "A3_enum_probabilities": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 273.8,
+          "p50": 270.4,
+          "p95": 280.0,
+          "min": 269.8,
+          "max": 281.1
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 492.4,
+          "p50": 492.0,
+          "p95": 493.7,
+          "min": 491.4,
+          "max": 493.8
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 280.0,
+          "p50": 280.0,
+          "p95": 280.0,
+          "min": 280.0,
+          "max": 280.0
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 494.9,
+          "p50": 494.9,
+          "p95": 494.9,
+          "min": 494.9,
+          "max": 494.9
+        },
+        "overhead_ms": -218.6,
+        "ratio": 0.56,
+        "accuracy_rate": 1.0
+      },
+      "A4_whole_schema": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 480.0,
+          "p50": 483.5,
+          "p95": 486.6,
+          "min": 469.6,
+          "max": 487.0
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 882.2,
+          "p50": 887.0,
+          "p95": 896.2,
+          "min": 862.3,
+          "max": 897.2
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 514.1,
+          "p50": 514.1,
+          "p95": 514.1,
+          "min": 514.1,
+          "max": 514.1
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 866.9,
+          "p50": 866.9,
+          "p95": 866.9,
+          "min": 866.9,
+          "max": 866.9
+        },
+        "overhead_ms": -402.2,
+        "ratio": 0.54,
+        "accuracy_rate": 1.0
+      }
+    },
+    "long": {
+      "A1_boolean": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 663.0,
+          "p50": 663.5,
+          "p95": 664.4,
+          "min": 661.1,
+          "max": 664.5
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 976.0,
+          "p50": 975.6,
+          "p95": 976.6,
+          "min": 975.5,
+          "max": 976.7
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 2408.5,
+          "p50": 2408.5,
+          "p95": 2408.5,
+          "min": 2408.5,
+          "max": 2408.5
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 981.9,
+          "p50": 981.9,
+          "p95": 981.9,
+          "min": 981.9,
+          "max": 981.9
+        },
+        "overhead_ms": -313.0,
+        "ratio": 0.68,
+        "accuracy_rate": 1.0
+      },
+      "A2_enum": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 671.0,
+          "p50": 670.9,
+          "p95": 672.8,
+          "min": 669.2,
+          "max": 673.0
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 978.4,
+          "p50": 978.9,
+          "p95": 979.5,
+          "min": 976.7,
+          "max": 979.5
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 2419.4,
+          "p50": 2419.4,
+          "p95": 2419.4,
+          "min": 2419.4,
+          "max": 2419.4
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 984.9,
+          "p50": 984.9,
+          "p95": 984.9,
+          "min": 984.9,
+          "max": 984.9
+        },
+        "overhead_ms": -307.4,
+        "ratio": 0.69,
+        "accuracy_rate": 1.0
+      },
+      "A3_enum_probabilities": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 760.8,
+          "p50": 671.7,
+          "p95": 917.7,
+          "min": 665.6,
+          "max": 945.1
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 980.6,
+          "p50": 977.5,
+          "p95": 986.1,
+          "min": 977.3,
+          "max": 987.1
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 2407.5,
+          "p50": 2407.5,
+          "p95": 2407.5,
+          "min": 2407.5,
+          "max": 2407.5
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 984.7,
+          "p50": 984.7,
+          "p95": 984.7,
+          "min": 984.7,
+          "max": 984.7
+        },
+        "overhead_ms": -219.8,
+        "ratio": 0.78,
+        "accuracy_rate": 1.0
+      },
+      "A4_whole_schema": {
+        "typellm_ms": {
+          "n": 3,
+          "mean": 1118.4,
+          "p50": 1040.2,
+          "p95": 1255.9,
+          "min": 1035.3,
+          "max": 1279.8
+        },
+        "floor_ms": {
+          "n": 3,
+          "mean": 1359.9,
+          "p50": 1357.0,
+          "p95": 1366.0,
+          "min": 1355.9,
+          "max": 1367.0
+        },
+        "cold_typellm_ms": {
+          "n": 1,
+          "mean": 3476.4,
+          "p50": 3476.4,
+          "p95": 3476.4,
+          "min": 3476.4,
+          "max": 3476.4
+        },
+        "cold_floor_ms": {
+          "n": 1,
+          "mean": 1408.9,
+          "p50": 1408.9,
+          "p95": 1408.9,
+          "min": 1408.9,
+          "max": 1408.9
+        },
+        "overhead_ms": -241.5,
+        "ratio": 0.82,
+        "accuracy_rate": 1.0
       }
     }
   }

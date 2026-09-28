@@ -56,13 +56,23 @@ class VLLMVisionTokenizer(ThinkingTokenizer):
 class FakeVLLM(VLLMClient):
     """A real VLLMClient whose HTTP layer answers like vLLM 0.28."""
 
-    def __init__(self):
-        super().__init__(model="fake-vllm")
+    def __init__(self, prefix_cache_block_tokens: int | None = None):
+        super().__init__(
+            model="fake-vllm",
+            prefix_cache_block_tokens=prefix_cache_block_tokens,
+        )
         self._chat_tokenizer = VLLMVisionTokenizer()
         self._context_length_cache = 100_000
         self._capabilities_checked = True  # skip live probes in unit tests
+        self._list_prompt_scoring = True
+        self._list_prompt_scoring_checked = True
         self.payloads = []
         self.paths = []
+        self.cache_prefix_calls = []
+
+    def cache_prefix(self, prefix: str):
+        self.cache_prefix_calls.append(prefix)
+        return super().cache_prefix(prefix)
 
     def _request(self, path, payload=None, *, allow_text=False):
         self.paths.append(path)
@@ -189,6 +199,26 @@ class FakeVLLM(VLLMClient):
 
     def _fake_completion(self, payload):
         prompt = payload["prompt"]
+        # List-prompt scoring returns one choice per prompt.
+        if isinstance(prompt, list):
+            choices = []
+            total_prompt = 0
+            for item in prompt:
+                one = self._fake_completion({**payload, "prompt": item})
+                choices.append(one["choices"][0])
+                total_prompt += one["usage"]["prompt_tokens"]
+            return {
+                "choices": choices,
+                "usage": {
+                    "prompt_tokens": total_prompt,
+                    "completion_tokens": len(choices),
+                    "prompt_tokens_details": {
+                        "cached_tokens": (
+                            784 if any(len(p) > 3000 for p in prompt) else 0
+                        ),
+                    },
+                },
+            }
         if payload.get("logprob_token_ids"):
             ids = list(payload["logprob_token_ids"])
             pick = ord(" ") if ord(" ") in ids else (
@@ -264,9 +294,13 @@ class FakeVLLM(VLLMClient):
         }
 
 
-def client_with_fake():
-    client = TypeLLMClient(backend="vllm", model="fake-vllm")
-    client.sglang = FakeVLLM()
+def client_with_fake(*, prefix_cache_block_tokens: int | None = None):
+    client = TypeLLMClient(
+        backend="vllm",
+        model="fake-vllm",
+        prefix_cache_block_tokens=prefix_cache_block_tokens,
+    )
+    client.sglang = FakeVLLM(prefix_cache_block_tokens=prefix_cache_block_tokens)
     return client
 
 
@@ -295,6 +329,12 @@ class BackendWiringTests(unittest.TestCase):
     def test_api_key_rejects_vllm_backend(self):
         with self.assertRaises(ValueError):
             TypeLLMClient(api_key="tl_sk_x", backend="vllm")
+
+    def test_prefix_cache_block_tokens_override(self):
+        client = TypeLLMClient(
+            backend="vllm", model="x", prefix_cache_block_tokens=784
+        )
+        self.assertEqual(client.sglang.prefix_cache_block_tokens, 784)
 
 
 class TranslationTests(unittest.TestCase):
@@ -506,7 +546,13 @@ class EndToEndVLLMTests(unittest.TestCase):
             if p["path"] == "/v1/completions"
             and (p["payload"] or {}).get("logprob_token_ids")
         ]
-        self.assertEqual(len(score_calls), 6)
+        # Merged list-prompt scoring issues one call with six prompts; the
+        # fan-out path issues six single-prompt calls.
+        prompt_count = 0
+        for call in score_calls:
+            prompt = (call["payload"] or {}).get("prompt")
+            prompt_count += len(prompt) if isinstance(prompt, list) else 1
+        self.assertEqual(prompt_count, 6)
         self.assertAlmostEqual(sum(result["roll"]["probabilities"].values()), 1.0, places=5)
 
     def test_free_text_max_length(self):
@@ -604,6 +650,98 @@ class CapabilityProbeTests(unittest.TestCase):
         server._fake_completion = bad_completion  # type: ignore[method-assign]
         with self.assertRaises(VLLMError):
             server._probe_logprob_token_ids()
+
+
+class LatencyOptimizationTests(unittest.TestCase):
+    RECEIPT = {
+        "merchant": {"type": "string", "instructions": "Merchant name."},
+        "total": {"type": "number", "instructions": "Total."},
+        "expense_type": {
+            "type": "string",
+            "enum": ["meal", "travel", "equipment"],
+            "instructions": "Expense type.",
+        },
+        "reimbursable": {"type": "boolean", "instructions": "Reimburse?"},
+    }
+
+    def test_warmup_skipped_below_block_size(self):
+        client = client_with_fake(prefix_cache_block_tokens=784)
+        client.generate(
+            context="Short receipt.",
+            questions={"ok": {"type": "boolean", "instructions": "Ok?"}},
+        )
+        self.assertEqual(client.sglang.cache_prefix_calls, [])
+
+    def test_warmup_runs_above_block_size(self):
+        client = client_with_fake(prefix_cache_block_tokens=8)
+        client.generate(
+            context="A short receipt with enough tokens for a cache block.",
+            questions={"ok": {"type": "boolean", "instructions": "Ok?"}},
+        )
+        self.assertGreaterEqual(len(client.sglang.cache_prefix_calls), 1)
+
+    def test_merged_scoring_matches_fanout(self):
+        prompts = [f"prompt-{i} " for i in range(4)]
+        ids = [[ord("A"), ord("B")] for _ in prompts]
+        merged = FakeVLLM()
+        merged._list_prompt_scoring = True
+        fanout = FakeVLLM()
+        fanout._list_prompt_scoring = False
+        merged_scores, _ = merged.score_candidates_batch(prompts, ids)
+        fanout_scores, _ = fanout.score_candidates_batch(prompts, ids)
+        self.assertEqual(len(merged_scores), len(fanout_scores))
+        for (a, _), (b, _) in zip(merged_scores, fanout_scores):
+            self.assertEqual(a, b)
+        # Merged path should issue one list-prompt completions call.
+        list_calls = [
+            p for p in merged.payloads
+            if p["path"] == "/v1/completions"
+            and isinstance((p["payload"] or {}).get("prompt"), list)
+        ]
+        self.assertEqual(len(list_calls), 1)
+
+    def test_open_and_score_overlap(self):
+        import time
+
+        client = client_with_fake(prefix_cache_block_tokens=784)
+        server = client.sglang
+        marks = []
+
+        original_fields = server.generate_fields
+        original_score = server.score_candidates_batch
+
+        def slow_fields(*args, **kwargs):
+            marks.append(("open_start", time.perf_counter()))
+            time.sleep(0.05)
+            result = original_fields(*args, **kwargs)
+            marks.append(("open_end", time.perf_counter()))
+            return result
+
+        def slow_score(*args, **kwargs):
+            marks.append(("score_start", time.perf_counter()))
+            time.sleep(0.05)
+            result = original_score(*args, **kwargs)
+            marks.append(("score_end", time.perf_counter()))
+            return result
+
+        server.generate_fields = slow_fields  # type: ignore[method-assign]
+        server.score_candidates_batch = slow_score  # type: ignore[method-assign]
+        client.generate(context="Receipt from Hilton.", questions=self.RECEIPT)
+        by_name = dict(marks)
+        self.assertIn("open_start", by_name)
+        self.assertIn("score_start", by_name)
+        # Both started before either finished => overlapped.
+        self.assertLess(by_name["score_start"], by_name["open_end"])
+        self.assertLess(by_name["open_start"], by_name["score_end"])
+
+    def test_results_identical_with_and_without_list_scoring(self):
+        with_list = client_with_fake(prefix_cache_block_tokens=784)
+        with_list.sglang._list_prompt_scoring = True
+        without = client_with_fake(prefix_cache_block_tokens=784)
+        without.sglang._list_prompt_scoring = False
+        a = with_list.generate(context="Receipt.", questions=self.RECEIPT).result
+        b = without.generate(context="Receipt.", questions=self.RECEIPT).result
+        self.assertEqual(a, b)
 
 
 if __name__ == "__main__":

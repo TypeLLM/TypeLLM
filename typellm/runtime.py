@@ -8,9 +8,11 @@ import math
 import os
 import random
 import threading
+import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, replace
 from itertools import permutations as all_permutations
 from string import ascii_uppercase, digits
@@ -34,6 +36,29 @@ HOSTED_URL = "https://api.typellm.ai"
 DEFAULT_SOCKET_TIMEOUT = 120.0
 DEFAULT_SGLANG_URL = "http://127.0.0.1:30000"
 DEFAULT_VLLM_URL = "http://127.0.0.1:8000"
+
+# Shared by open-field and scoring overlap within one generate() call.
+_LAYER_EXECUTOR: ThreadPoolExecutor | None = None
+_LAYER_EXECUTOR_LOCK = threading.Lock()
+
+
+def _layer_executor() -> ThreadPoolExecutor:
+    global _LAYER_EXECUTOR
+    with _LAYER_EXECUTOR_LOCK:
+        if _LAYER_EXECUTOR is None:
+            _LAYER_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+        return _LAYER_EXECUTOR
+
+
+def _should_cache_prefix(client: SGLangClient, prefix: str) -> bool:
+    """Warm a prefix only when it is long enough for a KV-cache hit."""
+    block = getattr(client, "prefix_cache_block_tokens", 1)
+    if type(block) is not int or block <= 1:
+        return True
+    count = getattr(client, "count_tokens", None)
+    if not callable(count):
+        return True
+    return count(prefix) >= block
 
 
 def _closed_answer(decision: "Choice", value_json: str) -> str:
@@ -171,6 +196,7 @@ class TypeLLMClient:
         numeric_max_digits: int = 32,
         tokenizer: str | None = None,
         text_max_tokens: int = 128,
+        prefix_cache_block_tokens: int | None = None,
     ) -> None:
         """Run on your own SGLang or vLLM server.
 
@@ -186,6 +212,10 @@ class TypeLLMClient:
 
         temperature 0 (the default) picks the most likely answer; above 0 samples
         at that temperature. mode is deprecated: temperature alone decides.
+
+        ``prefix_cache_block_tokens`` overrides the vLLM prefix-cache block
+        size used to decide whether a shared-prefix warm-up is worth sending.
+        Omit it to probe the server once.
         """
         mode, temperature = _resolve_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
@@ -212,6 +242,7 @@ class TypeLLMClient:
                     tokenizer=tokenizer,
                     text_max_tokens=text_max_tokens,
                     answer_reserve_tokens=numeric_max_digits + 3,
+                    prefix_cache_block_tokens=prefix_cache_block_tokens,
                 )
             else:
                 self.sglang = SGLangClient(
@@ -434,11 +465,16 @@ class TypeLLMClient:
         # The time budget covers compiling too: labels are tokenized by SGLang.
         with call_scope(timeout, cancel) as scope:
             try:
+                t0 = time.perf_counter()
                 decisions = self.compile_schema(schema)
+                LOG.debug("phase=compile elapsed=%.4fs fields=%d", time.perf_counter() - t0, len(decisions))
                 count = getattr(self.sglang, "count_tokens", None)
                 if callable(count):
+                    t1 = time.perf_counter()
                     scope.usage.input_tokens = sum(map(count, (
                         context, json.dumps(questions if questions is not None else schema, ensure_ascii=False))))
+                    LOG.debug("phase=count_tokens elapsed=%.4fs input_tokens=%d",
+                              time.perf_counter() - t1, scope.usage.input_tokens)
                     scope.unmeasured_images = len(encoded_images)
                 # Independent fields run together; depends_on turns the fields into a
                 # graph whose layers run in order.
@@ -446,11 +482,13 @@ class TypeLLMClient:
                        else _execute_batch_decisions)
                 attach = self.sglang.images(encoded_images) if encoded_images else nullcontext()
                 with attach:
+                    t2 = time.perf_counter()
                     rows, prompts = run(
                         self.sglang, context, decisions, active_mode,
                         active_temperature, rng, self.numeric_max_digits,
                         image_count=len(encoded_images),
                     )
+                    LOG.debug("phase=execute elapsed=%.4fs", time.perf_counter() - t2)
             except BaseException as exc:
                 exc.usage = scope.usage  # partial work, for callers that bill it
                 raise
@@ -798,13 +836,24 @@ def _execute_batch_decisions(
     ordering_groups = []
 
     # Warm each distinct parent once before siblings, including thinking/text
-    # requests. Root context is warmed only in the first DAG layer.
+    # requests. Root context is warmed only in the first DAG layer, and only
+    # when the prefix is long enough for a KV-cache hit.
     if incremental:
+        t_warm = time.perf_counter()
         prefixes = list(dict.fromkeys(parent_prefixes.values()))
         if any(d.name not in parent_prefixes for d in decisions):
             prefixes.insert(0, shared_prefix)
+        warmed = 0
         for prefix in prefixes:
-            client.cache_prefix(prefix)
+            if _should_cache_prefix(client, prefix):
+                client.cache_prefix(prefix)
+                warmed += 1
+        LOG.debug(
+            "phase=warmup_parents elapsed=%.4fs candidates=%d warmed=%d",
+            time.perf_counter() - t_warm,
+            len(prefixes),
+            warmed,
+        )
 
     finite_indexes: list[int] = []
     open_results: dict[int, tuple[dict, str]] = {}
@@ -880,14 +929,26 @@ def _execute_batch_decisions(
     # prefilled in the same batch cannot reuse each other's cache, so thinking,
     # number and text batches would each prefill the context once per prompt.
     # SGLang then forks the cached state; TypeLLM never reads or moves KV tensors.
-    if finite_indexes and not incremental:
+    # Skip when the prefix is shorter than one prefix-cache block (common on
+    # hybrid vLLM models whose blocks are hundreds of tokens).
+    if finite_indexes and not incremental and _should_cache_prefix(client, shared_prefix):
+        t_warm = time.perf_counter()
         cache_meta = client.cache_prefix(shared_prefix)
+        LOG.debug(
+            "phase=warmup elapsed=%.4fs cached_tokens=%s",
+            time.perf_counter() - t_warm,
+            cache_meta.get("cached_tokens"),
+        )
         LOG.info("batch_shared_prefix_cached_tokens=%s", cache_meta.get("cached_tokens"))
+    elif finite_indexes and not incremental:
+        LOG.debug("phase=warmup skipped (prefix shorter than cache block)")
 
     per_field = any(t is not None for t in raw_thinking) or any(b is not None for b in raw_budgets)
+    t_think = time.perf_counter()
     ready = (client.prepare_answer_prefixes(raw_prompts, **({"thinking": raw_thinking, "budgets": raw_budgets}
                                                            if per_field else {}))
              if defer else raw_prompts)
+    LOG.debug("phase=thinking elapsed=%.4fs prompts=%d", time.perf_counter() - t_think, len(raw_prompts))
     prompts = [ready[decision_slots[index]] for index in finite_indexes]
     scoring_prompts = [ready[slot] + prefill for slot, prefill in zip(scoring_slots, scoring_prefills)]
     # Open fields continue from {"name": ; history gets the closed object.
@@ -900,12 +961,21 @@ def _execute_batch_decisions(
     numeric_pending = [item for item in open_pending if item[1].numeric_type is not None]
     text_pending = [item for item in open_pending if item[1].text_type]
 
-    # A layer's numbers and strings decode side by side in one request.
-    if numeric_pending or text_pending:
+    # Seeds for open fields must be drawn on this thread: Random is not
+    # thread-safe, and overlap runs open fields on a worker.
+    number_seed = rng.randrange(2**31) if any(
+        item[1].numeric_type is not None for item in open_pending
+    ) else 0
+    text_seed = rng.randrange(2**31) if any(
+        item[1].text_type for item in open_pending
+    ) else 0
+
+    def run_open_fields():
+        if not (numeric_pending or text_pending):
+            return {}
         number_items = [(prompt + decision.answer_prefill, decision)
                         for _, decision, _, prompt in numeric_pending]
-        number_seed = rng.randrange(2**31) if numeric_pending else 0
-        text_seed = rng.randrange(2**31) if text_pending else 0
+        t_open = time.perf_counter()
         raw_numbers, values = client.generate_fields(
             [prompt for prompt, _ in number_items],
             [numeric_pattern(d.numeric_type or "", numeric_max_digits, d.nullable) for _, d in number_items],
@@ -921,16 +991,68 @@ def _execute_batch_decisions(
             # A nullable string writes null or its text in the same request.
             nullable=[decision.nullable for _, decision, _, _ in text_pending],
         )
+        LOG.debug(
+            "phase=open_fields elapsed=%.4fs numbers=%d texts=%d",
+            time.perf_counter() - t_open,
+            len(number_items),
+            len(text_pending),
+        )
+        results_open: dict[int, tuple[dict, str]] = {}
         for (index, decision, messages, prompt), (value, _completed, generated_text) in zip(
                 numeric_pending, _parse_numbers(number_items, raw_numbers)):
-            open_results[index] = (open_row(decision, value),
+            results_open[index] = (open_row(decision, value),
                                    complete(prompt, messages, _closed_answer(decision, generated_text)))
         for (index, decision, messages, prompt), value in zip(text_pending, values):
             completed = complete(prompt, messages, _closed_answer(decision, json.dumps(value, ensure_ascii=False)))
-            open_results[index] = (open_row(decision, value), completed)
+            results_open[index] = (open_row(decision, value), completed)
+        return results_open
+
+    def run_scoring():
+        if not prompts:
+            return [], 0.0
+        t_score = time.perf_counter()
+        scored, elapsed = client.score_candidates_batch(scoring_prompts, scoring_ids)
+        LOG.debug(
+            "phase=scoring elapsed=%.4fs prompts=%d",
+            time.perf_counter() - t_score,
+            len(scoring_prompts),
+        )
+        return scored, elapsed
+
+    # Open fields and finite scoring only share the rendered prefixes; they do
+    # not depend on each other's outputs. Overlap them unless images are active
+    # (the vLLM image path is sequential on purpose).
+    has_open = bool(numeric_pending or text_pending)
+    has_finite = bool(prompts)
+    active_images = getattr(client, "_active_images", None)
+    has_images = bool(active_images.get()) if active_images is not None else False
+    overlap = has_open and has_finite and not has_images
+    if overlap:
+        t_overlap = time.perf_counter()
+        open_future = _layer_executor().submit(copy_context().run, run_open_fields)
+        score_future = _layer_executor().submit(copy_context().run, run_scoring)
+        # Raise the first failure; still wait for the sibling so its usage is counted.
+        open_error = score_error = None
+        try:
+            open_results = open_future.result()
+        except BaseException as exc:
+            open_error = exc
+            open_results = {}
+        try:
+            scored, elapsed = score_future.result()
+        except BaseException as exc:
+            score_error = exc
+            scored, elapsed = [], 0.0
+        LOG.debug("phase=open_and_score_overlap wall=%.4fs", time.perf_counter() - t_overlap)
+        if open_error is not None:
+            raise open_error
+        if score_error is not None:
+            raise score_error
+    else:
+        open_results = run_open_fields() if has_open else {}
+        scored, elapsed = run_scoring() if has_finite else ([], 0.0)
 
     if prompts:
-        scored, elapsed = client.score_candidates_batch(scoring_prompts, scoring_ids)
         grouped_scores = []
         offset = 0
         for orders in ordering_groups:
@@ -938,6 +1060,7 @@ def _execute_batch_decisions(
             offset += len(orders)
         scored = [group[0] for group in grouped_scores]
     else:
+        grouped_scores = []
         scored, elapsed = [], 0.0
 
     results: list[dict] = []
