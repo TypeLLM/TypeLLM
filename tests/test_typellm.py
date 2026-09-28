@@ -1013,6 +1013,8 @@ class HostedApiTests(unittest.TestCase):
         client = TypeLLMClient(api_key="k")
         for response in (httpx.Response(200, text="not JSON"),
                          httpx.Response(200, json={"result": {"a": True}}),
+                         httpx.Response(200, json={"result": {"a": {"value": True, "probabilities": []}},
+                                                   "usage": {"input_tokens": 1, "thinking_tokens": 0}}),
                          httpx.Response(302, headers={"Location": "/elsewhere"})):
             with self.subTest(status=response.status_code):
                 client._transport = httpx.MockTransport(lambda request: response)
