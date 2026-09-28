@@ -12,7 +12,7 @@ from tests.test_dependencies import DependencyFake
 
 class PermutationTests(unittest.TestCase):
     def run_case(self, dependent, values, **options):
-        client = TypeLLMClient(seed=42, **options)
+        client = TypeLLMClient("http://127.0.0.1:30000", seed=42, **options)
         client.sglang = DependencyFake([65] * 100)
         fields = {
             'roll': {'type': 'string' if isinstance(values[0], str) else 'integer',
@@ -61,7 +61,7 @@ class PermutationTests(unittest.TestCase):
         ] + [{'type': 'string', 'enum': ['a', 'b'], 'permutations': v}
              for v in (0, -1, True, False, 2.0, None, '8', 'AUTO', {}, [])]
         invalid.append({'type': 'integer', 'enum': list(range(7)), 'permutations': 'all'})
-        client = TypeLLMClient()
+        client = TypeLLMClient("http://127.0.0.1:30000")
         with patch.object(client.sglang, 'single_token') as tokens:
             for field in invalid:
                 with self.subTest(field=field), self.assertRaises(SchemaError):
@@ -69,7 +69,7 @@ class PermutationTests(unittest.TestCase):
             tokens.assert_not_called()
 
     def test_plain_output_boolean_enum_and_clamped_budget(self):
-        client = TypeLLMClient()
+        client = TypeLLMClient("http://127.0.0.1:30000")
         client.sglang = DependencyFake([65] * 3)
         result = client.generate(context='x', questions={
             'x': {'type': 'boolean', 'enum': [False, True], 'permutations': 100},
@@ -80,7 +80,7 @@ class PermutationTests(unittest.TestCase):
         self.assertEqual(len(client.sglang.batch_prompts[0]), 3)
 
     def test_average_probabilities_not_logits(self):
-        client = TypeLLMClient()
+        client = TypeLLMClient("http://127.0.0.1:30000")
         fake = DependencyFake()
         client.sglang = fake
         with patch.object(fake, 'score_candidates_batch', return_value=([
@@ -114,7 +114,7 @@ class PermutationTests(unittest.TestCase):
         self.assertEqual(len(value_orders(['a', 'b', 'c', 'd', 'e', 'f'])), 6)
 
     def test_auto_cancels_a_pure_position_bias(self):
-        client = TypeLLMClient()
+        client = TypeLLMClient("http://127.0.0.1:30000")
         client.sglang = DependencyFake()
         biased = {65: math.log(.5), 66: math.log(.2), 67: math.log(.15), 68: math.log(.15)}
         with patch.object(client.sglang, 'score_candidates_batch',
@@ -129,7 +129,7 @@ class PermutationTests(unittest.TestCase):
     def test_one_matches_default(self):
         outputs = []
         for setting in ({}, {'permutations': 1}):
-            client = TypeLLMClient()
+            client = TypeLLMClient("http://127.0.0.1:30000")
             client.sglang = DependencyFake([66])
             outputs.append(client.generate(context='x', questions={'x': {
                 'type': 'string', 'enum': ['a', 'b'], 'return_probabilities': True, **setting}}))

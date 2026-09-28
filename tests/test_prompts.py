@@ -4,7 +4,7 @@ from typellm import TypeLLMClient
 
 
 def prompts(fields):
-    client = TypeLLMClient(model="fake")
+    client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
     client.sglang.single_token = lambda label: (ord(label), label)
     return {c.name: c.opening_text() for c in client.compile_schema({"type": "object", "properties": fields})}
 

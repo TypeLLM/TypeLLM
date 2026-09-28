@@ -47,7 +47,7 @@ class CompileTests(unittest.TestCase):
 
 class RuntimeTests(unittest.TestCase):
     def test_nullable_number_can_answer_null(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = NullServer()
         result = client.generate(context="Receipt", questions={
             "tip": {"type": ["number", "null"]}, "count": {"type": "integer"},
@@ -56,7 +56,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("Return null only if there is no value.", client.last_prompts[0])
 
     def test_nullable_string_writes_null_in_its_text_request(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = NullServer()
         result = client.generate(context="Receipt", questions={
             "note": {"type": ["string", "null"], "maxLength": 20}, "name": {"type": "string"},
@@ -74,7 +74,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('{"note": null}', client.last_prompts[0])
 
     def test_nullable_boolean_scores_null_as_a_choice(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeSGLang(selected_ids=[ord("C")])
         result = client.generate(context="Receipt", questions={
             "paid": {"type": ["boolean", "null"], "return_probabilities": True},
@@ -83,7 +83,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(set(result["paid"]["probabilities"]), {True, False, None})
 
     def test_dependents_see_null(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = NullServer()
         client.generate(context="Receipt", questions={
             "tip": {"type": ["number", "null"]},

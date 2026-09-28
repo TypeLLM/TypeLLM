@@ -36,7 +36,7 @@ class FieldProbabilityTests(unittest.TestCase):
             {'type': 'boolean', 'return_probabilities': value}
             for value in (None, 0, 1, 'true')
         ]
-        client = TypeLLMClient()
+        client = TypeLLMClient("http://127.0.0.1:30000")
         with patch.object(client.sglang, 'single_token') as tokens:
             for field in fields:
                 with self.subTest(field=field), self.assertRaises(SchemaError):

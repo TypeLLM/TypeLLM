@@ -32,7 +32,7 @@ class TextTests(unittest.TestCase):
             self.assertEqual(client.generate_texts(['p'],[0]),[''])
 
     def test_mixed_fields_run_together(self):
-        client=TypeLLMClient()
+        client=TypeLLMClient("http://127.0.0.1:30000")
         fake=FakeSGLang([ord('7'),3,ord('A')])
         calls=[]
         def generate(prefixes, limits, **kwargs):
@@ -60,10 +60,10 @@ class TextTests(unittest.TestCase):
             self.assertEqual(constructor.call_args.kwargs['text_max_tokens'],24)
         for budget in (0,-1,True):
             with self.assertRaises(ValueError):
-                TypeLLMClient(text_max_tokens=budget)
+                TypeLLMClient("http://127.0.0.1:30000", text_max_tokens=budget)
 
     def test_thinking_then_constrained_text(self):
-        client=TypeLLMClient()
+        client=TypeLLMClient("http://127.0.0.1:30000")
         client.sglang._context_length_cache=8192
         client.sglang._chat_tokenizer=FakeChatTokenizer()
         client.sglang._chat_tokenizer.apply_chat_template=lambda *args,**kw: "assistant\n<think>\n" if kw["enable_thinking"] else "completed"

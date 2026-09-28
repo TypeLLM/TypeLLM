@@ -61,7 +61,7 @@ class GrammarNumberTests(unittest.TestCase):
     QUESTIONS = {"a": {"type": "integer"}, "b": {"type": "number"}, "c": {"type": "integer"}}
 
     def test_every_number_of_a_layer_takes_one_request(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
         result = client.generate(context="Receipt", questions=self.QUESTIONS)
         self.assertEqual(result, {"a": 7, "b": 7, "c": 7})
@@ -73,7 +73,7 @@ class GrammarNumberTests(unittest.TestCase):
         self.assertIn('{"a": 7}', client.last_prompts[0])
 
     def test_numbers_and_strings_of_a_layer_share_one_request(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
         result = client.generate(context="Receipt", questions={
             "a": {"type": "integer"}, "n": {"type": "string"},
@@ -87,14 +87,14 @@ class GrammarNumberTests(unittest.TestCase):
         self.assertIn("null", patterns[3])
 
     def test_sampling_passes_the_temperature_and_no_truncation(self):
-        client = TypeLLMClient(model="fake", temperature=0.7, seed=1)
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake", temperature=0.7, seed=1)
         client.sglang = FakeServer()
         client.generate(context="Receipt", questions={"a": {"type": "integer"}})
         [params] = regex_requests(client.sglang)[0]["sampling_params"]
         self.assertEqual((params["temperature"], params["top_p"], params["top_k"]), (0.7, 1.0, -1))
 
     def test_nullable_numbers_can_be_null_in_the_same_request(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = NullServer()
         result = client.generate(context="Receipt", questions={"tip": {"type": ["number", "null"]}})
         self.assertEqual(result, {"tip": None})
@@ -104,7 +104,7 @@ class GrammarNumberTests(unittest.TestCase):
     def test_an_incomplete_or_cut_off_number_is_an_error(self):
         for reply, finish, error in ((" 3.}", "stop", ValueError), (" 12", "length", SGLangError)):
             with self.subTest(reply=reply):
-                client = TypeLLMClient(model="fake")
+                client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
                 client.sglang = ReplyServer(reply, finish)
                 with self.assertRaises(error):
                     client.generate(context="Receipt", questions={"a": {"type": "number"}})
@@ -112,7 +112,7 @@ class GrammarNumberTests(unittest.TestCase):
     def test_negative_and_spaceless_numbers_parse(self):
         for reply, value in ((" -3.5}", -3.5), ("42}", 42.0), (" 0", 0.0)):
             with self.subTest(reply=reply):
-                client = TypeLLMClient(model="fake")
+                client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
                 client.sglang = ReplyServer(reply)
                 self.assertEqual(client.generate(context="R", questions={"a": {"type": "number"}}),
                                  {"a": value})

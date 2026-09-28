@@ -161,7 +161,7 @@ class ImageEncodingTests(unittest.TestCase):
 
 class PicklingTests(unittest.TestCase):
     def test_clients_pickle_and_copy_without_sharing_images(self):
-        client = TypeLLMClient(model="m")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="m")
         for copy in (pickle.loads(pickle.dumps(client)), deepcopy(client)):
             self.assertEqual(copy.sglang.model, "m")
             token = client.sglang._active_images.set(("a",))
@@ -177,7 +177,7 @@ class PlaceholderTests(unittest.TestCase):
         self.assertEqual(FakeServerClient().image_placeholder(), VISION)
 
     def test_text_only_template_is_rejected_before_any_request(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient(VisionTokenizer(renders_images=False))
         with self.assertRaisesRegex(SGLangError, "does not render image content"):
             client.generate(context="Receipt", images=[PNG],
@@ -185,7 +185,7 @@ class PlaceholderTests(unittest.TestCase):
         self.assertEqual(client.sglang.generate_payloads, [])
 
     def test_context_containing_image_tokens_is_rejected(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
         with self.assertRaisesRegex(SGLangError, "2 image placeholders for 1 images"):
             client.generate(context=VISION, images=[PNG],
@@ -199,7 +199,7 @@ class ImageRequestTests(unittest.TestCase):
     }
 
     def run_generate(self, images, **kwargs):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
         client.generate(context="Receipt", images=images, **kwargs)
         return client.sglang.generate_payloads
@@ -239,14 +239,14 @@ class ImageRequestTests(unittest.TestCase):
         self.assert_images_attached(self.run_generate(images, questions=dag), images)
 
     def test_numeric_decoding_carries_the_images(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
         client.generate(context="Receipt", images=[PNG],
                         questions={"n": {"type": "integer", "instructions": "Count?"}})
         self.assert_images_attached(client.sglang.generate_payloads, [encode_image(PNG)])
 
     def test_images_are_scoped_to_one_call(self):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
         client.generate(context="Receipt", images=[PNG], questions=self.QUESTIONS)
         client.sglang.generate_payloads.clear()
@@ -273,7 +273,7 @@ class ImageRequestTests(unittest.TestCase):
 
 class ImageInputTokenTests(unittest.TestCase):
     def test_images_count_as_the_server_expands_them(self):
-        client = TypeLLMClient(model="fake-vl")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake-vl")
         client.sglang = FakeServerClient()
         questions = {"a": {"type": "boolean"}}
         client.generate(context="Receipt", images=[PNG], questions=questions)
@@ -302,7 +302,7 @@ class RuntimeContentTests(unittest.TestCase):
                 self.messages.append(messages)
                 return "x"
 
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = Recording()
         client.generate(context="Receipt", images=[PNG, PNG],
                         questions={"paid": {"type": "boolean", "instructions": "Paid?"}})

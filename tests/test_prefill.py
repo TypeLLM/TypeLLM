@@ -13,7 +13,7 @@ class PrefillTests(unittest.TestCase):
     }
 
     def run_generate(self, questions, **kwargs):
-        client = TypeLLMClient(model="fake")
+        client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
         result = client.generate(context="Receipt", questions=questions, **kwargs)
         return client, result
