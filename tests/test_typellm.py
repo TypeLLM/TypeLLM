@@ -1017,15 +1017,17 @@ class HostedApiTests(unittest.TestCase):
             self.assertEqual(TypeLLMClient(api_key="k").api_key, "k")
             self.assertIsNone(TypeLLMClient("http://127.0.0.1:30000").api_key)
         with patch.dict("os.environ", {"TYPELLM_API_KEY": " env\n"}):
-            client = TypeLLMClient(api_key="")
+            client = TypeLLMClient()
             self.assertEqual(client.api_key, "env")
             self.assertIsNone(client.sglang)
             self.assertEqual(client.base_url, "https://api.typellm.ai")
             self.assertEqual(TypeLLMClient(api_key=" k\n").api_key, "k")
+            for blank in ("", " \n"):  # never swapped for the env key
+                with self.subTest(blank=blank), self.assertRaisesRegex(ValueError, "api_key is empty"):
+                    TypeLLMClient(api_key=blank)
         for blank in ("", " \n"):
             with patch.dict("os.environ", {"TYPELLM_API_KEY": blank}):
                 self.assertIsNone(TypeLLMClient().api_key)
-                self.assertIsNone(TypeLLMClient(api_key=" ").api_key)
         with patch.dict("os.environ", {}, clear=True):
             client = TypeLLMClient()
             self.assertIsNone(client.api_key)

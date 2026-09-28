@@ -177,9 +177,9 @@ class TypeLLMClient:
         uses its own default.
 
         Given neither api_key nor base_url, the TYPELLM_API_KEY environment
-        variable is used as api_key when set. A blank key counts as unset, and
-        surrounding whitespace is dropped. A base_url alone always means your
-        own server.
+        variable is used as api_key unless it is blank. Whitespace around either
+        key is dropped, and a blank api_key raises ValueError. A base_url alone
+        always means your own server.
 
         temperature 0 (the default) picks the most likely answer; above 0 samples
         at that temperature. mode is deprecated: temperature alone decides.
@@ -187,9 +187,12 @@ class TypeLLMClient:
         mode, temperature = _resolve_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
             raise ValueError("numeric_max_digits must be a positive integer")
-        api_key = (api_key or "").strip() or None
-        if api_key is None and base_url is None:
-            api_key = (os.environ.get("TYPELLM_API_KEY") or "").strip() or None
+        if api_key is not None:
+            api_key = api_key.strip()
+            if not api_key:
+                raise ValueError("api_key is empty")
+        elif base_url is None:
+            api_key = os.environ.get("TYPELLM_API_KEY", "").strip() or None
         self.api_key = api_key
         if api_key is None:
             self.sglang = SGLangClient(
