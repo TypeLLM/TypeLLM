@@ -161,6 +161,8 @@ def _partial_json_string(text: str) -> str:
 
 
 class SGLangClient:
+    _server_name = "SGLang"
+
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:30000",
@@ -283,7 +285,7 @@ class SGLangClient:
         except httpx.HTTPError as exc:
             # Connection failures, timeouts, resets and truncated responses.
             raise SGLangError(
-                f"Could not reach SGLang at {self.base_url}: {exc!r}"
+                f"Could not reach {self._server_name} at {self.base_url}: {exc!r}"
             ) from exc
         try:
             return json.loads(raw)
@@ -291,7 +293,7 @@ class SGLangClient:
             if allow_text:
                 return raw
             raise SGLangError(
-                f"SGLang {path} returned non-JSON data: {raw[:500]}"
+                f"{self._server_name} {path} returned non-JSON data: {raw[:500]}"
             ) from exc
 
     def _send(self, path: str, get: bool, body: bytes | None, timeout: float) -> str:
@@ -309,7 +311,7 @@ class SGLangClient:
                 except httpx.HTTPError as read_error:
                     detail = f"Could not read error response: {read_error}"
                 raise SGLangError(
-                    f"SGLang {path} returned HTTP {response.status_code}: {detail}",
+                    f"{self._server_name} {path} returned HTTP {response.status_code}: {detail}",
                     status=response.status_code,
                 )
             return response.read().decode("utf-8")
