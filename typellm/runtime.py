@@ -169,9 +169,11 @@ class TypeLLMClient:
 
         With api_key, calls go to the hosted API instead, by default
         https://api.typellm.ai. It compiles and runs the schema itself. Model
-        chooses one of its models; temperature, seed and timeout apply.
-        A hosted timeout set here is the default for generate() calls; without
-        one, the service uses its own default.
+        chooses one of its models; temperature, seed and timeout apply, while
+        tokenizer, thinking_budget, text_max_tokens, numeric_max_digits and
+        label_pool need your own server and raise ValueError. A hosted timeout
+        set here is the default for generate() calls; without one, the service
+        uses its own default.
 
         Given neither api_key nor base_url, the TYPELLM_API_KEY environment
         variable is used as api_key when set. A base_url alone always means
@@ -197,6 +199,15 @@ class TypeLLMClient:
                 answer_reserve_tokens=numeric_max_digits + 3,
             )
         else:
+            local_only = [name for name, value, default in (
+                ("tokenizer", tokenizer, None), ("thinking_budget", thinking_budget, None),
+                ("text_max_tokens", text_max_tokens, 128),
+                ("numeric_max_digits", numeric_max_digits, 32),
+                ("label_pool", label_pool, None)) if value != default]
+            if local_only:
+                raise ValueError(f"{', '.join(local_only)} can only be set for your own server, "
+                                 "a base_url without api_key. The hosted API, chosen by api_key "
+                                 "or TYPELLM_API_KEY, sets its own.")
             self.sglang = None
             self.base_url = (base_url or HOSTED_URL).rstrip("/")
             self.model = model

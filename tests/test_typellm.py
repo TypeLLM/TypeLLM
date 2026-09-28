@@ -1015,6 +1015,17 @@ class HostedApiTests(unittest.TestCase):
         with patch.dict("os.environ", {"TYPELLM_API_KEY": ""}):
             self.assertIsNone(TypeLLMClient().api_key)
 
+    def test_hosted_rejects_options_only_own_server_uses(self):
+        from unittest.mock import patch
+        for option in ({"tokenizer": "t"}, {"thinking_budget": 64}, {"text_max_tokens": 64},
+                       {"numeric_max_digits": 8}, {"label_pool": "AB"}):
+            with self.subTest(option=option), self.assertRaisesRegex(ValueError, "your own server"):
+                TypeLLMClient(api_key="k", **option)
+        with patch.dict("os.environ", {"TYPELLM_API_KEY": "env"}):
+            with self.assertRaisesRegex(ValueError, "tokenizer can only be set"):
+                TypeLLMClient(tokenizer="t")
+            self.assertIsNone(TypeLLMClient("http://127.0.0.1:30000", tokenizer="t").api_key)
+
     def test_hosted_compile_schema_requires_own_server(self):
         client = TypeLLMClient(api_key="k")
         with self.assertRaisesRegex(ValueError, "compile_schema needs your own server"):
