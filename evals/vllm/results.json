@@ -1,0 +1,821 @@
+{
+  "generated_at": "2026-09-28T12:48:42Z",
+  "url": "http://192.168.140.40:8000/v1",
+  "model": "RedHatAI/Qwen3.8-27B-INT4",
+  "tokenizer": "RedHatAI/Qwen3.8-27B-INT4",
+  "vllm_version": "0.28.0",
+  "environment": {
+    "models": {
+      "object": "list",
+      "data": [
+        {
+          "id": "RedHatAI/Qwen3.8-27B-INT4",
+          "object": "model",
+          "created": 1790599376,
+          "owned_by": "vllm",
+          "root": "RedHatAI/Qwen3.8-27B-INT4",
+          "parent": null,
+          "max_model_len": 32000,
+          "permission": [
+            {
+              "id": "modelperm-a317f594ea9324c1",
+              "object": "model_permission",
+              "created": 1790599376,
+              "allow_create_engine": false,
+              "allow_sampling": true,
+              "allow_logprobs": true,
+              "allow_search_indices": false,
+              "allow_view": true,
+              "allow_fine_tuning": false,
+              "organization": "*",
+              "group": null,
+              "is_blocking": false
+            }
+          ]
+        }
+      ]
+    },
+    "runs": 3,
+    "warmups": 1,
+    "cold": 1
+  },
+  "correctness": [
+    {
+      "name": "C1_receipt_five_types",
+      "ok": true,
+      "seconds": 2.648,
+      "result": {
+        "merchant": "Hilton London",
+        "total": 324.5,
+        "expense_type": "travel",
+        "reimbursable": true,
+        "confidence": 1.0
+      },
+      "checks": {
+        "merchant": true,
+        "total": true,
+        "expense_type": true,
+        "reimbursable": true,
+        "confidence": true
+      },
+      "usage": {
+        "requests": 3,
+        "prompt_tokens": 491,
+        "cached_tokens": 0,
+        "completion_tokens": 18,
+        "thinking_tokens": 0,
+        "input_tokens": 172
+      }
+    },
+    {
+      "name": "C2_return_probabilities",
+      "ok": true,
+      "seconds": 0.533,
+      "result": {
+        "expense_type": {
+          "value": "travel",
+          "probabilities": {
+            "meal": 0.10638810893250303,
+            "travel": 0.8907767433211722,
+            "equipment": 0.0028351477463248805
+          }
+        }
+      }
+    },
+    {
+      "name": "C3_numbers",
+      "ok": true,
+      "seconds": 0.36,
+      "result": {
+        "answer": 70.0,
+        "count": 7
+      }
+    },
+    {
+      "name": "C4_nullable",
+      "ok": true,
+      "seconds": 0.929,
+      "result": {
+        "tip": null,
+        "table": "7A",
+        "paid_in_cash": null,
+        "card": null
+      }
+    },
+    {
+      "name": "C5_text_max_length",
+      "ok": true,
+      "seconds": 0.34,
+      "result": {
+        "summary": "Hilton London stay"
+      }
+    },
+    {
+      "name": "C6_depends_on",
+      "ok": true,
+      "seconds": 1.719,
+      "result": {
+        "system": "payments",
+        "severity": "high",
+        "deployment_related": true,
+        "rollback": true
+      }
+    },
+    {
+      "name": "C7_permutations_auto",
+      "ok": true,
+      "seconds": 1.278,
+      "result": {
+        "roll": {
+          "value": "one",
+          "probabilities": {
+            "one": 0.24878627273226794,
+            "two": 0.13664360679902202,
+            "three": 0.12398600961874051,
+            "four": 0.1312042134208012,
+            "five": 0.13427715614584845,
+            "six": 0.22510274128331983
+          }
+        }
+      },
+      "prob_range": [
+        0.12398600961874051,
+        0.24878627273226794
+      ]
+    },
+    {
+      "name": "C8_thinking",
+      "ok": true,
+      "seconds": 13.253,
+      "result": {
+        "policy_ok": true
+      },
+      "thinking_chars": 4399,
+      "usage": {
+        "requests": 3,
+        "prompt_tokens": 1322,
+        "cached_tokens": 784,
+        "completion_tokens": 1025,
+        "thinking_tokens": 1024,
+        "input_tokens": 61
+      }
+    },
+    {
+      "name": "C9_forced_close",
+      "ok": true,
+      "seconds": 1.199,
+      "result": {
+        "policy_ok": false
+      },
+      "usage": {
+        "requests": 3,
+        "prompt_tokens": 330,
+        "cached_tokens": 0,
+        "completion_tokens": 33,
+        "thinking_tokens": 32,
+        "input_tokens": 59
+      }
+    },
+    {
+      "name": "C10_image",
+      "ok": true,
+      "seconds": 24.589,
+      "result": {
+        "total": 12.5,
+        "paid": true
+      },
+      "usage": {
+        "requests": 3,
+        "prompt_tokens": 815,
+        "cached_tokens": 0,
+        "completion_tokens": 9,
+        "thinking_tokens": 0,
+        "input_tokens": 272
+      }
+    },
+    {
+      "name": "C11_image_thinking",
+      "ok": true,
+      "seconds": 23.59,
+      "result": {
+        "paid": true
+      },
+      "thinking": true
+    },
+    {
+      "name": "C12_real_receipt_photo",
+      "ok": true,
+      "seconds": 321.094,
+      "result": {
+        "first_item": "ICE BLACKCOFFEE",
+        "item_lines": 3,
+        "subtotal": 194000.0,
+        "discount": 19400.0,
+        "total": 174600.0,
+        "discount_percent": 10.0,
+        "paid_in_cash": true
+      },
+      "matches": {
+        "first_item": false,
+        "item_lines": true,
+        "subtotal": true,
+        "discount": true,
+        "total": true,
+        "discount_percent": true,
+        "paid_in_cash": true
+      },
+      "score": "6/7",
+      "subset": [
+        "first_item",
+        "item_lines",
+        "subtotal",
+        "discount",
+        "total",
+        "discount_percent",
+        "paid_in_cash"
+      ],
+      "note": "Ran separately; full 14-field multimodal DAG is multi-minute on this server"
+    },
+    {
+      "name": "C13_serving_features",
+      "ok": true,
+      "seconds": 4.266,
+      "concurrency": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "seed_repeat_equal": true,
+      "timeout": true,
+      "cancel": true,
+      "usage": {
+        "requests": 2,
+        "prompt_tokens": 122,
+        "cached_tokens": 0,
+        "completion_tokens": 1,
+        "thinking_tokens": 0,
+        "input_tokens": 45
+      }
+    },
+    {
+      "name": "C14_prefix_reuse",
+      "ok": true,
+      "seconds": 3.945,
+      "first_cached": 7056,
+      "second_cached": 14112,
+      "usage": {
+        "requests": 2,
+        "prompt_tokens": 14525,
+        "cached_tokens": 14112,
+        "completion_tokens": 1,
+        "thinking_tokens": 0,
+        "input_tokens": 7258
+      }
+    }
+  ],
+  "speed": {
+    "short": {
+      "B1_normal_json": {
+        "latency": {
+          "n": 3,
+          "mean": 1.143,
+          "p50": 1.144,
+          "p95": 1.144,
+          "min": 1.142,
+          "max": 1.145
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 1.147,
+          "p50": 1.147,
+          "p95": 1.147,
+          "min": 1.147,
+          "max": 1.147
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 168,
+            "completion_tokens": 55,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 168,
+            "completion_tokens": 55,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 168,
+            "completion_tokens": 55,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          }
+        ]
+      },
+      "B2_normal_thinking": {
+        "latency": {
+          "n": 3,
+          "mean": 3.721,
+          "p50": 3.717,
+          "p95": 3.729,
+          "min": 3.717,
+          "max": 3.73
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 5.43,
+          "p50": 5.43,
+          "p95": 5.43,
+          "min": 5.43,
+          "max": 5.43
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 153,
+            "total_tokens": 426,
+            "completion_tokens": 273,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 235
+            }
+          },
+          {
+            "prompt_tokens": 153,
+            "total_tokens": 426,
+            "completion_tokens": 273,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 235
+            }
+          },
+          {
+            "prompt_tokens": 153,
+            "total_tokens": 426,
+            "completion_tokens": 273,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 235
+            }
+          }
+        ]
+      },
+      "B3_native_structured": {
+        "latency": {
+          "n": 3,
+          "mean": 1.122,
+          "p50": 1.122,
+          "p95": 1.123,
+          "min": 1.121,
+          "max": 1.123
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 1.127,
+          "p50": 1.127,
+          "p95": 1.127,
+          "min": 1.127,
+          "max": 1.127
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 166,
+            "completion_tokens": 53,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 166,
+            "completion_tokens": 53,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 113,
+            "total_tokens": 166,
+            "completion_tokens": 53,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          }
+        ]
+      },
+      "T1_typellm": {
+        "latency": {
+          "n": 3,
+          "mean": 1.011,
+          "p50": 1.013,
+          "p95": 1.017,
+          "min": 1.003,
+          "max": 1.018
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 1.031,
+          "p50": 1.031,
+          "p95": 1.031,
+          "min": 1.031,
+          "max": 1.031
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 491,
+            "completion_tokens": 18,
+            "cached_tokens": 0,
+            "thinking_tokens": 0,
+            "requests": 3
+          },
+          {
+            "prompt_tokens": 491,
+            "completion_tokens": 18,
+            "cached_tokens": 0,
+            "thinking_tokens": 0,
+            "requests": 3
+          },
+          {
+            "prompt_tokens": 491,
+            "completion_tokens": 18,
+            "cached_tokens": 0,
+            "thinking_tokens": 0,
+            "requests": 3
+          }
+        ]
+      },
+      "T2_typellm_thinking": {
+        "latency": {
+          "n": 3,
+          "mean": 9.347,
+          "p50": 9.836,
+          "p95": 13.795,
+          "min": 3.969,
+          "max": 14.235
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 9.069,
+          "p50": 9.069,
+          "p95": 9.069,
+          "min": 9.069,
+          "max": 9.069
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 1963,
+            "completion_tokens": 645,
+            "cached_tokens": 0,
+            "thinking_tokens": 627,
+            "requests": 4
+          },
+          {
+            "prompt_tokens": 2764,
+            "completion_tokens": 1435,
+            "cached_tokens": 784,
+            "thinking_tokens": 1417,
+            "requests": 4
+          },
+          {
+            "prompt_tokens": 2658,
+            "completion_tokens": 1340,
+            "cached_tokens": 0,
+            "thinking_tokens": 1322,
+            "requests": 4
+          }
+        ]
+      }
+    },
+    "long": {
+      "B1_normal_json": {
+        "latency": {
+          "n": 3,
+          "mean": 1.656,
+          "p50": 1.657,
+          "p95": 1.657,
+          "min": 1.655,
+          "max": 1.657
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 3.391,
+          "p50": 3.391,
+          "p95": 3.391,
+          "min": 3.391,
+          "max": 3.391
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          }
+        ]
+      },
+      "B2_normal_thinking": {
+        "latency": {
+          "n": 3,
+          "mean": 7.179,
+          "p50": 7.177,
+          "p95": 7.186,
+          "min": 7.174,
+          "max": 7.187
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 8.933,
+          "p50": 8.933,
+          "p95": 8.933,
+          "min": 8.933,
+          "max": 8.933
+        },
+        "schema_valid_rate": 0.0,
+        "accuracy_rate": 0.0,
+        "tokens": [
+          {
+            "prompt_tokens": 7352,
+            "total_tokens": 7864,
+            "completion_tokens": 512,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512
+            }
+          },
+          {
+            "prompt_tokens": 7352,
+            "total_tokens": 7864,
+            "completion_tokens": 512,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512
+            }
+          },
+          {
+            "prompt_tokens": 7352,
+            "total_tokens": 7864,
+            "completion_tokens": 512,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512
+            }
+          }
+        ]
+      },
+      "B3_native_structured": {
+        "latency": {
+          "n": 3,
+          "mean": 1.667,
+          "p50": 1.664,
+          "p95": 1.674,
+          "min": 1.66,
+          "max": 1.675
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 3.385,
+          "p50": 3.385,
+          "p95": 3.385,
+          "min": 3.385,
+          "max": 3.385
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          },
+          {
+            "prompt_tokens": 7312,
+            "total_tokens": 7368,
+            "completion_tokens": 56,
+            "prompt_tokens_details": {
+              "cached_tokens": 7056,
+              "created_cache_tokens": 0,
+              "multimodal_tokens": null
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            }
+          }
+        ]
+      },
+      "T1_typellm": {
+        "latency": {
+          "n": 3,
+          "mean": 2.007,
+          "p50": 1.951,
+          "p95": 2.233,
+          "min": 1.805,
+          "max": 2.264
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 4.552,
+          "p50": 4.552,
+          "p95": 4.552,
+          "min": 4.552,
+          "max": 4.552
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 43685,
+            "completion_tokens": 18,
+            "cached_tokens": 42336,
+            "thinking_tokens": 0,
+            "requests": 3
+          },
+          {
+            "prompt_tokens": 43685,
+            "completion_tokens": 18,
+            "cached_tokens": 42336,
+            "thinking_tokens": 0,
+            "requests": 3
+          },
+          {
+            "prompt_tokens": 43685,
+            "completion_tokens": 18,
+            "cached_tokens": 42336,
+            "thinking_tokens": 0,
+            "requests": 3
+          }
+        ]
+      },
+      "T2_typellm_thinking": {
+        "latency": {
+          "n": 3,
+          "mean": 17.094,
+          "p50": 17.748,
+          "p95": 17.968,
+          "min": 15.543,
+          "max": 17.992
+        },
+        "cold_latency": {
+          "n": 1,
+          "mean": 20.433,
+          "p50": 20.433,
+          "p95": 20.433,
+          "min": 20.433,
+          "max": 20.433
+        },
+        "schema_valid_rate": 1.0,
+        "accuracy_rate": 1.0,
+        "tokens": [
+          {
+            "prompt_tokens": 83237,
+            "completion_tokens": 2708,
+            "cached_tokens": 79184,
+            "thinking_tokens": 2690,
+            "requests": 4
+          },
+          {
+            "prompt_tokens": 83382,
+            "completion_tokens": 2853,
+            "cached_tokens": 79184,
+            "thinking_tokens": 2835,
+            "requests": 4
+          },
+          {
+            "prompt_tokens": 82237,
+            "completion_tokens": 1730,
+            "cached_tokens": 78400,
+            "thinking_tokens": 1712,
+            "requests": 4
+          }
+        ]
+      }
+    }
+  }
+}
