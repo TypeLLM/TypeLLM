@@ -173,12 +173,18 @@ class TypeLLMClient:
         A hosted timeout set here is the default for generate() calls; without
         one, the service uses its own default.
 
+        Given neither api_key nor base_url, the TYPELLM_API_KEY environment
+        variable is used as api_key when set. A base_url alone always means
+        your own server.
+
         temperature 0 (the default) picks the most likely answer; above 0 samples
         at that temperature. mode is deprecated: temperature alone decides.
         """
         mode, temperature = _resolve_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
             raise ValueError("numeric_max_digits must be a positive integer")
+        if api_key is None and base_url is None:
+            api_key = os.environ.get("TYPELLM_API_KEY") or None
         self.api_key = api_key
         if api_key is None:
             self.sglang = SGLangClient(

@@ -1005,6 +1005,16 @@ class HostedApiTests(unittest.TestCase):
         with self.assertRaises(ValueError):  # only local compilation takes a raw schema
             client.generate(context="x", schema={"type": "object", "properties": {"a": {"type": "boolean"}}})
 
+    def test_env_key_applies_only_without_api_key_and_base_url(self):
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"TYPELLM_API_KEY": "env"}):
+            self.assertEqual(TypeLLMClient().api_key, "env")
+            self.assertEqual(TypeLLMClient(model="m").api_key, "env")
+            self.assertEqual(TypeLLMClient(api_key="k").api_key, "k")
+            self.assertIsNone(TypeLLMClient("http://127.0.0.1:30000").api_key)
+        with patch.dict("os.environ", {"TYPELLM_API_KEY": ""}):
+            self.assertIsNone(TypeLLMClient().api_key)
+
     def test_hosted_compile_schema_requires_own_server(self):
         client = TypeLLMClient(api_key="k")
         with self.assertRaisesRegex(ValueError, "compile_schema needs your own server"):
