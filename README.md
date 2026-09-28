@@ -36,7 +36,7 @@ TypeLLM brings type-safe generation to existing autoregressive LLMs without chan
 2. **Negligible output-token cost** — Single-token categorical selection and bounded numeric decoding; optional thinking adds tokens.
 3. **Shared-prefix reuse** — KV caching avoids reprocessing shared context.
 4. **Dependency-aware execution** — Independent fields run together; declare `depends_on` to form a dependency graph.
-5. **Made for open autoregressive LLMs** — Use compatible models you already serve with SGLang.
+5. **Made for open autoregressive LLMs** — Use compatible models you already serve with SGLang or vLLM.
 6. **Supports thinking mode** — Enable reasoning before the final constrained answer.
 7. **Image input** — Pass images to vision-language models alongside the text context. See [Image input](#image-input).
 8. **Permutation averaging** — Reduce option-order bias on explicit enum questions with balanced, sampled or exhaustive orderings. See the [docs](https://typellm.ai/docs/probabilities#permutation-averaging).
@@ -61,6 +61,24 @@ to start it with prefix caching enabled.
 
 See [Supported models](#supported-models) for tested checkpoints and thinking behavior.
 
+### 1b. Or serve with vLLM
+
+TypeLLM also talks to a [vLLM](https://docs.vllm.ai/) OpenAI-compatible server.
+Start the server with prefix caching and prompt-token details enabled:
+
+```bash
+vllm serve Qwen/Qwen3.8-27B \
+  --enable-prefix-caching \
+  --enable-prompt-tokens-details \
+  --max-model-len 32000
+```
+
+Hybrid models such as Qwen3.8 use large prefix-cache blocks (often 784 tokens).
+Shared-context reuse only helps when the context is longer than one block.
+With `--reasoning-parser qwen3`, constrained decoding applies after the closed
+`</think>` block; TypeLLM always closes thinking before the typed answer.
+`flush_cache` needs `VLLM_SERVER_DEV_MODE=1` on the server.
+
 ### 2. Run TypeLLM
 
 ```bash
@@ -78,6 +96,15 @@ client = TypeLLMClient(
 )
 ```
 
+Or at a vLLM server:
+
+```python
+client = TypeLLMClient(
+    "http://127.0.0.1:8000",
+    model="Qwen/Qwen3.8-27B",
+    backend="vllm",
+)
+```
 Example request:
 
 ```python

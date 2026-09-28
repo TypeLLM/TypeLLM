@@ -26,11 +26,14 @@ from .schema import (
 )
 from .images import encode_images
 from .sglang import GenerationTimeout, SGLangClient, SGLangError, Usage, call_scope
+from .vllm import VLLMClient
 
 
 LOG = logging.getLogger("typellm")
 HOSTED_URL = "https://api.typellm.ai"
 DEFAULT_SOCKET_TIMEOUT = 120.0
+DEFAULT_SGLANG_URL = "http://127.0.0.1:30000"
+DEFAULT_VLLM_URL = "http://127.0.0.1:8000"
 
 
 def _closed_answer(decision: "Choice", value_json: str) -> str:
@@ -149,7 +152,7 @@ class Generation:
 
 
 class TypeLLMClient:
-    """Generate typed answers with local SGLang or the hosted API."""
+    """Generate typed answers with local SGLang, vLLM or the hosted API."""
 
     DEFAULT_LABEL_POOL = tuple(ascii_uppercase + digits)
 
@@ -159,6 +162,7 @@ class TypeLLMClient:
         model: str | None = None,
         *,
         api_key: str | None = None,
+        backend: str = "sglang",
         mode: str | None = None,
         temperature: float | None = None,
         seed: int | None = None,
@@ -168,7 +172,11 @@ class TypeLLMClient:
         tokenizer: str | None = None,
         text_max_tokens: int = 128,
     ) -> None:
-        """Run on your own SGLang server, by default http://127.0.0.1:30000.
+        """Run on your own SGLang or vLLM server.
+
+        ``backend="sglang"`` (the default) talks to SGLang at
+        http://127.0.0.1:30000. ``backend="vllm"`` talks to a vLLM OpenAI
+        server at http://127.0.0.1:8000. Pass ``base_url`` to override.
 
         With api_key, calls go to the hosted API instead, by default
         https://api.typellm.ai. It compiles and runs the schema itself. Model
@@ -182,22 +190,38 @@ class TypeLLMClient:
         mode, temperature = _resolve_decoding(mode, temperature)
         if type(numeric_max_digits) is not int or numeric_max_digits <= 0:
             raise ValueError("numeric_max_digits must be a positive integer")
+        if backend not in {"sglang", "vllm"}:
+            raise ValueError("backend must be 'sglang' or 'vllm'")
         self.api_key = api_key
-        if api_key is None:
-            self.sglang = SGLangClient(
-                base_url or "http://127.0.0.1:30000",
-                model,
-                DEFAULT_SOCKET_TIMEOUT if timeout is None else timeout,
-                tokenizer=tokenizer,
-                text_max_tokens=text_max_tokens,
-                answer_reserve_tokens=numeric_max_digits + 3,
-            )
-        else:
+        self.backend = backend
+        if api_key is not None:
+            if backend != "sglang":
+                raise ValueError("backend is only used with a local server; omit it when using api_key")
             self.sglang = None
             self.base_url = (base_url or HOSTED_URL).rstrip("/")
             self.model = model
             self.timeout = timeout
             self._transport: httpx.BaseTransport | None = None  # tests put a MockTransport here
+        else:
+            socket_timeout = DEFAULT_SOCKET_TIMEOUT if timeout is None else timeout
+            if backend == "vllm":
+                self.sglang = VLLMClient(
+                    base_url or DEFAULT_VLLM_URL,
+                    model,
+                    socket_timeout,
+                    tokenizer=tokenizer,
+                    text_max_tokens=text_max_tokens,
+                    answer_reserve_tokens=numeric_max_digits + 3,
+                )
+            else:
+                self.sglang = SGLangClient(
+                    base_url or DEFAULT_SGLANG_URL,
+                    model,
+                    socket_timeout,
+                    tokenizer=tokenizer,
+                    text_max_tokens=text_max_tokens,
+                    answer_reserve_tokens=numeric_max_digits + 3,
+                )
         self.mode = mode
         self.temperature = temperature
         self.rng = random.Random(seed)
@@ -1007,15 +1031,22 @@ def run_schema(
     images: Sequence[Any] | None = None,
     base_url: str | None = None,
     model: str | None = None,
+    backend: str = "sglang",
     seed: int | None = None,
     numeric_max_digits: int = 32,
     tokenizer: str | None = None,
     text_max_tokens: int = 128,
     print_final_prompt: bool = False,
 ) -> Generation:
+    default_url = (
+        os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
+        if backend == "vllm"
+        else os.environ.get("SGLANG_URL", "http://127.0.0.1:30000")
+    )
     client = TypeLLMClient(
-        base_url or os.environ.get("SGLANG_URL", "http://127.0.0.1:30000"),
-        model or os.environ.get("SGLANG_MODEL"),
+        base_url or default_url,
+        model or os.environ.get("SGLANG_MODEL") or os.environ.get("VLLM_MODEL"),
+        backend=backend,
         mode=mode,
         temperature=temperature,
         seed=seed,

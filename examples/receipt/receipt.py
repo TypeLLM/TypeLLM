@@ -42,13 +42,14 @@ EXPECTED = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', default='http://127.0.0.1:30000')
+    parser.add_argument('--backend', choices=('sglang', 'vllm'), default='sglang')
     parser.add_argument('--model', default='qwen3.8-27b')
     parser.add_argument('--tokenizer', default='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead')
     parser.add_argument('--thinking', action='store_true')
     parser.add_argument('--output', type=Path, default=HERE / 'result.json')
     args = parser.parse_args()
     client = TypeLLMClient(args.url, model=args.model, tokenizer=args.tokenizer,
-                           timeout=300)
+                           backend=args.backend, timeout=300)
     start = time.monotonic()
     result = client.generate(context='Read the attached photo of a restaurant receipt.',
                              images=[HERE / 'receipt.jpg'],

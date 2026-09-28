@@ -39,17 +39,24 @@ def example_schema() -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="typellm",
-        description="Type-safe decisions over SGLang /generate"
+        description="Type-safe decisions over SGLang or vLLM"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("sglang", "vllm"),
+        default=os.environ.get("TYPELLM_BACKEND", "sglang"),
     )
     parser.add_argument(
         "--server-url",
-        default=os.environ.get("SGLANG_URL", "http://127.0.0.1:30000"),
+        default=None,
+        help="Server URL; defaults to http://127.0.0.1:30000 for SGLang, "
+             "http://127.0.0.1:8000 for vLLM",
     )
-    parser.add_argument("--model", default=os.environ.get("SGLANG_MODEL"))
+    parser.add_argument("--model", default=os.environ.get("SGLANG_MODEL") or os.environ.get("VLLM_MODEL"))
     parser.add_argument(
         "--tokenizer",
         default=os.environ.get("TYPELLM_TOKENIZER"),
-        help="Tokenizer path or Hugging Face ID; normally discovered from SGLang",
+        help="Tokenizer path or Hugging Face ID; normally discovered from the server",
     )
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="0 picks the most likely answer; above 0 samples")
@@ -71,9 +78,15 @@ def main() -> None:
     if args.probabilities:
         for field in schema["properties"].values():
             field["return_probabilities"] = True
+    default_url = (
+        os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
+        if args.backend == "vllm"
+        else os.environ.get("SGLANG_URL", "http://127.0.0.1:30000")
+    )
     client = TypeLLMClient(
-        args.server_url,
+        args.server_url or default_url,
         args.model,
+        backend=args.backend,
         mode=args.mode,
         temperature=args.temperature,
         seed=args.seed,

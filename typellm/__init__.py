@@ -26,6 +26,7 @@ from .sglang import (
     Usage,
     extract_candidate_logprobs,
 )
+from .vllm import VLLMClient, VLLMError
 from .cli import example_schema, main
 
 __all__ = [
@@ -40,9 +41,12 @@ __all__ = [
     "SchemaError",
     "TypeLLMClient",
     "Usage",
+    "VLLMClient",
+    "VLLMError",
     "benchmark_prefix_cache",
     "candidate_softmax",
     "compile_json_schema",
     "example_schema",
+    "extract_candidate_logprobs",
     "run_schema",
 ]
