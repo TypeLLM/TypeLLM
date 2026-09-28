@@ -22,8 +22,10 @@ def _overrides(thinking: bool | None, budget: int | None) -> tuple:
 
 
 class SGLangError(RuntimeError):
-    def __init__(self, message: str = "", *, status: int | None = None) -> None:
+    def __init__(self, message: str = "", *, status: int | None = None,
+                 usage: Usage | None = None) -> None:
         super().__init__(message)
+        self.usage = usage
         self.status = status  # The HTTP status SGLang answered with, if any.
 
 
@@ -42,19 +44,20 @@ class Usage:
     input_tokens is what the caller sent, each part counted once: the context,
     the questions or schema as JSON, and the images as the server expands them.
     The other counts are what SGLang reported for the call's /generate requests,
-    where the shared context is part of every prompt.
+    where the shared context is part of every prompt. A hosted count that the
+    service did not provide is None; zero means a reported count of zero.
     """
 
-    requests: int = 0
-    prompt_tokens: int = 0
-    cached_tokens: int = 0
-    completion_tokens: int = 0
+    requests: int | None = 0
+    prompt_tokens: int | None = 0
+    cached_tokens: int | None = 0
+    completion_tokens: int | None = 0
     # The part of completion_tokens that is reasoning, not typed answers.
-    thinking_tokens: int = 0
-    input_tokens: int = 0
+    thinking_tokens: int | None = 0
+    input_tokens: int | None = 0
 
     def _add(self, response: Any) -> None:
-        self.requests += 1
+        self.requests = (self.requests or 0) + 1
         for item in response if isinstance(response, list) else [response]:
             meta = item.get("meta_info") if isinstance(item, Mapping) else None
             if not isinstance(meta, Mapping):
@@ -62,7 +65,7 @@ class Usage:
             for name in ("prompt_tokens", "cached_tokens", "completion_tokens"):
                 value = meta.get(name)
                 if type(value) is int:
-                    setattr(self, name, getattr(self, name) + value)
+                    setattr(self, name, (getattr(self, name) or 0) + value)
 
 
 def _count_thinking(response: Any) -> None:
@@ -74,7 +77,7 @@ def _count_thinking(response: Any) -> None:
         meta = item.get("meta_info") if isinstance(item, Mapping) else None
         tokens = meta.get("completion_tokens") if isinstance(meta, Mapping) else None
         if type(tokens) is int:
-            scope.usage.thinking_tokens += tokens
+            scope.usage.thinking_tokens = (scope.usage.thinking_tokens or 0) + tokens
 
 
 @dataclass
@@ -391,7 +394,8 @@ class SGLangClient:
             return
         # The server replaces each placeholder with the image's tokens.
         placeholders = scope.unmeasured_images * self.count_tokens(self.image_placeholder())
-        scope.usage.input_tokens += max(0, served - self.count_tokens(prompt) + placeholders)
+        scope.usage.input_tokens = (scope.usage.input_tokens or 0) + max(
+            0, served - self.count_tokens(prompt) + placeholders)
         scope.unmeasured_images = 0
 
     def _with_images(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:

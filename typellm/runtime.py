@@ -11,7 +11,7 @@ import threading
 import warnings
 from contextlib import nullcontext
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from itertools import permutations as all_permutations
 from string import ascii_uppercase, digits
 from typing import Any, Mapping, Sequence
@@ -490,20 +490,73 @@ class TypeLLMClient:
         except httpx.HTTPError as exc:
             raise SGLangError(f"Could not reach the TypeLLM API at {self.base_url}: {exc!r}") from exc
         if response.status_code != 200:
-            error = GenerationTimeout if response.status_code == 504 else SGLangError
-            raise error(f"TypeLLM API returned HTTP {response.status_code}: {response.text}",
-                        status=response.status_code)
+            usage = None
+            error_type = None
+            try:
+                data = response.json()
+                if isinstance(data, dict):
+                    details = data.get("error")
+                    if isinstance(details, dict):
+                        error_type = details.get("type")
+                    if data.get("usage") is not None:
+                        usage = _hosted_usage(data["usage"])
+            except (ValueError, TypeError):
+                pass  # Missing or invalid error metadata must not hide the HTTP failure.
+            error_class = GenerationTimeout if response.status_code == 504 else SGLangError
+            error = error_class(f"TypeLLM API returned HTTP {response.status_code}: {response.text}",
+                                status=response.status_code, usage=usage)
+            # Older services use invalid_request for all schema/value errors. Verify
+            # a schema error locally only after that rejection; a successful request
+            # must remain compatible with newer service-side schema features.
+            if response.status_code == 400 and error_type == "invalid_request":
+                try:
+                    compile_json_schema({"type": "object", "properties": questions})
+                except (SchemaError, ValueError, NotImplementedError) as exc:
+                    setattr(exc, "status", response.status_code)
+                    setattr(exc, "usage", usage)
+                    raise exc from error
+                except Exception:
+                    pass  # A diagnostic failure must preserve the original API error.
+            raise error
+        usage = None
         try:
             data = response.json()
-            usage = data["usage"]
+            usage = _hosted_usage(data["usage"])
+            if usage.input_tokens is None or usage.thinking_tokens is None:
+                raise ValueError("missing input_tokens or thinking_tokens")
             result = data["result"]
             thinking = data.get("thinking") or {}
-            input_tokens = usage["input_tokens"]
-            thinking_tokens = usage["thinking_tokens"]
+            if not isinstance(result, dict) or not isinstance(thinking, dict):
+                raise ValueError("result and thinking must be objects")
+            if any(not isinstance(value, str) for value in thinking.values()):
+                raise ValueError("thinking values must be strings")
+            # JSON keys are strings: key probabilities by each field's values again.
+            # Older services serialize both "None" and null as "None".
+            for name, question in questions.items():
+                answer = result.get(name)
+                if isinstance(answer, dict) and "probabilities" in answer:
+                    probabilities = answer["probabilities"]
+                    if not isinstance(probabilities, dict):
+                        raise ValueError("probabilities must be an object")
+                    values = {json.dumps(value) if type(value) is bool else str(value): value
+                              for value in question.get("enum") or (True, False, None)}
+                    answer["probabilities"] = {values.get(key, key): probability
+                                               for key, probability in probabilities.items()}
         except (ValueError, TypeError, KeyError) as exc:
             raise SGLangError("TypeLLM API returned an invalid response",
-                              status=response.status_code) from exc
-        return Generation(result, thinking, Usage(input_tokens=input_tokens, thinking_tokens=thinking_tokens))
+                              status=response.status_code, usage=usage) from exc
+        return Generation(result, thinking, usage)
+
+
+def _hosted_usage(data: Any) -> Usage:
+    """Read only reported counts; absent counts remain unknown, including on errors."""
+    if not isinstance(data, dict):
+        raise ValueError("usage must be an object")
+    counts = {field.name: data.get(field.name) for field in fields(Usage)}
+    if any(value is not None and (type(value) is not int or value < 0)
+           for value in counts.values()):
+        raise ValueError("usage counts must be non-negative integers or null")
+    return Usage(**counts)
 
 
 def candidate_softmax(

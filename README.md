@@ -333,6 +333,12 @@ result = client.generate(
 Only opted-in fields return `value` and `probabilities`; other fields return plain values.
 The option is not supported on open Numeric or Text fields.
 
+Local and hosted clients key `probabilities` by the field's Python values, so
+`answer["probabilities"][answer["value"]]` selects the answer's probability.
+The current hosted service cannot distinguish the string `"None"` from `None`
+when both occur in an enum: its JSON encoding collapses those two probability
+keys. Avoid that combination when requesting hosted probabilities.
+
 `temperature` is 0 by default: each field gets its most likely answer. Above 0,
 TypeLLM samples at that temperature:
 
@@ -414,12 +420,31 @@ print(response.usage)
 # Usage(requests=4, prompt_tokens=1830, cached_tokens=1504, completion_tokens=7, thinking_tokens=0, input_tokens=410)
 ```
 
-`usage` reports the tokens of the call. When a call fails partway, the
-exception's `.usage` holds what it spent. `input_tokens` is what you sent, each part
-counted once: the context, the questions as JSON, and the images. The other
+`usage` reports the tokens of the call. `input_tokens` is what you sent, each
+part counted once: the context, the questions as JSON, and the images. The other
 counts are SGLang's for the call's requests, where every prompt carries the
-shared context. A timeout or cancel stops
-the call before its next SGLang request.
+shared context. `requests` counts those SGLang requests, not calls to the hosted API.
+
+Both local and hosted calls return `Generation`, with `.result`, `.thinking`,
+and `.usage`. Hosted counts that the service did not report are `None`, not zero.
+The current service reports `input_tokens` and `thinking_tokens`; its internal
+request, prompt, cache, and completion counts are unavailable. Check for `None`
+before using a count in arithmetic. `client.last_prompts` is available locally
+only; a hosted client does not receive the service's prompts.
+
+When a local call fails partway, the exception's `.usage` holds the recorded
+work. Hosted errors expose `.usage` when the service supplies it; otherwise it
+is `None`, including when the connection fails. Unknown usage does not mean the
+call consumed no tokens. The current gateway does not include usage in its
+public error responses.
+
+For HTTP 400 `invalid_request` responses, the client checks whether its schema
+validator can identify the error and raises the same exception as a local call
+(`SchemaError` or `NotImplementedError`). The HTTP status remains on `.status`,
+and the original `SGLangError` is kept as the exception's cause. Successful
+hosted calls are not validated again, so they can use newer service features.
+Other HTTP failures remain `SGLangError`; HTTP 504 raises `GenerationTimeout`.
+A local timeout or cancel stops the call before its next SGLang request.
 
 ## Cost analysis
 
