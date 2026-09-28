@@ -29,7 +29,7 @@ def main():
                 'type': 'string', 'enum': LABELS, 'instructions': QUESTION,
                 'permutations': budget, 'return_probabilities': True,
             }},
-        )['roll']
+        ).result['roll']
         probs = answer['probabilities']
         assert set(probs) == set(LABELS)
         assert all(math.isfinite(p) and 0 <= p <= 1 for p in probs.values())

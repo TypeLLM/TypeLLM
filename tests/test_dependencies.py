@@ -39,7 +39,7 @@ class DependencyTests(unittest.TestCase):
             'right': {'type': 'boolean', 'depends_on': ['root']},
             'root': {'type': 'boolean', 'return_probabilities': True},
         }
-        result = client.generate(context='shared', questions=questions)
+        result = client.generate(context='shared', questions=questions).result
         self.assertEqual(list(result), list(questions))
         self.assertEqual([len(b) for b in client.sglang.batch_prompts], [2, 2, 1])
         middle = client.sglang.batch_prompts[1]
@@ -51,7 +51,7 @@ class DependencyTests(unittest.TestCase):
         for name in ('root', 'left', 'right'):
             self.assertIn(f'"{name}": true', final)
         self.assertNotIn('unrelated', final)
-        self.assertIn('Field: "final"', client.last_prompts[0])
+        self.assertIn('Field: "final"', client._last_prompts.get()[0])
         self.assertTrue(result['root']['value'])
 
     def test_incremental_prefixes_and_unique_warmups(self):
@@ -61,8 +61,8 @@ class DependencyTests(unittest.TestCase):
             'b': {'type': 'boolean', 'depends_on': ['a']},
             'c': {'type': 'boolean', 'depends_on': ['a']},
             'd': {'type': 'boolean', 'depends_on': ['b', 'c']},
-        })
-        a, b, c, d = client.last_prompts
+        }).result
+        a, b, c, d = client._last_prompts.get()
         self.assertTrue(b.startswith(a))
         self.assertTrue(c.startswith(a))
         self.assertTrue(d.startswith(b))
@@ -82,8 +82,8 @@ class DependencyTests(unittest.TestCase):
         client.generate(context='', questions={
             'a': {'type': 'boolean'},
             'b': {'type': 'boolean', 'depends_on': ['a']},
-        })
-        a, b = client.last_prompts
+        }).result
+        a, b = client._last_prompts.get()
         self.assertTrue(b.startswith(a))
         self.assertEqual(a.count('<think>retained reasoning</think>'), 1)
         self.assertEqual(b.count('<think>retained reasoning</think>'), 2)
@@ -94,12 +94,12 @@ class DependencyTests(unittest.TestCase):
             'pick': {'type': 'integer', 'enum': list(range(24)),
                      'return_probabilities': True},
             'check': {'type': 'boolean', 'depends_on': ['pick']},
-        })
+        }).result
         self.assertEqual(result['pick']['value'], 23)
         self.assertEqual(len(result['pick']['probabilities']), 24)
         self.assertEqual(list(client.label_token_map)[:24], list('ABCDEFGHIJKLMNOPQRSTUVWX'))
-        self.assertIn('"pick": 23', client.last_prompts[1])
-        self.assertTrue(client.last_prompts[1].startswith(client.last_prompts[0]))
+        self.assertIn('"pick": 23', client._last_prompts.get()[1])
+        self.assertTrue(client._last_prompts.get()[1].startswith(client._last_prompts.get()[0]))
 
     def test_always_thinking_template_continuation_runs_once(self):
         client = SGLangClient()
@@ -122,7 +122,7 @@ class DependencyTests(unittest.TestCase):
     def test_cli_has_no_execution_mode(self):
         from typellm.cli import main
         with patch('sys.argv', ['typellm']), patch('typellm.cli.TypeLLMClient') as factory, patch('builtins.print'), patch('typellm.cli.logging.basicConfig'):
-            factory.return_value.generate.return_value = {}
+            factory.return_value.generate.return_value.result = {}
             main()
             self.assertNotIn('execution', factory.call_args.kwargs)
         with patch('sys.argv', ['typellm', '--execution', 'dag']), patch('sys.stderr'), self.assertRaises(SystemExit):
@@ -141,7 +141,7 @@ class DependencyTests(unittest.TestCase):
 
     def test_empty_dependencies(self):
         client = self.client()
-        client.generate(context='', questions={'a': {'type': 'boolean', 'depends_on': []}, 'b': {'type': 'boolean'}})
+        client.generate(context='', questions={'a': {'type': 'boolean', 'depends_on': []}, 'b': {'type': 'boolean'}}).result
         self.assertEqual(len(client.sglang.batch_prompts[0]), 2)
 
     def test_numeric_dependency_uses_semantic_value(self):
@@ -149,25 +149,25 @@ class DependencyTests(unittest.TestCase):
         result = client.generate(context='', questions={
             'number': {'type': 'integer', 'depends_on': []},
             'check': {'type': 'boolean', 'depends_on': ['number']},
-        })
+        }).result
         self.assertEqual(result, {'number': 7, 'check': True})
-        self.assertTrue(client.last_prompts[1].startswith(client.last_prompts[0]))
+        self.assertTrue(client._last_prompts.get()[1].startswith(client._last_prompts.get()[0]))
         self.assertIn('"number": 7', client.sglang.batch_prompts[0][0])
 
     def test_text_dependency_and_schema_interface(self):
         client = self.client()
-        client.sglang.generate_texts = lambda prompts, limits, **kwargs: ['hello "世界"'] * len(prompts)
+        client.sglang.generate_texts = lambda prompts, **kwargs: ['hello "世界"'] * len(prompts)
         result = client.generate(context='', schema={'type': 'object', 'properties': {
             'text': {'type': 'string'},
             'check': {'type': 'boolean', 'depends_on': ['text']},
-        }})
+        }}).result
         self.assertEqual(result['text'], 'hello "世界"')
-        self.assertTrue(client.last_prompts[1].startswith(client.last_prompts[0]))
+        self.assertTrue(client._last_prompts.get()[1].startswith(client._last_prompts.get()[0]))
         self.assertIn('"text": "hello \\"世界\\""', client.sglang.batch_prompts[0][0])
 
     def test_fields_without_dependencies_run_together(self):
         client = self.client()
-        client.generate(context='', questions={'a': {'type': 'boolean'}, 'b': {'type': 'boolean'}})
+        client.generate(context='', questions={'a': {'type': 'boolean'}, 'b': {'type': 'boolean'}}).result
         self.assertEqual([len(batch) for batch in client.sglang.batch_prompts], [2])
         self.assertFalse(client.sglang.prompts)
 
@@ -175,7 +175,7 @@ class DependencyTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             TypeLLMClient(execution='sequential')
         with self.assertRaises(TypeError):
-            self.client().generate(context='', questions={'a': {'type': 'boolean'}}, execution='dag')
+            self.client().generate(context='', questions={'a': {'type': 'boolean'}}, execution='dag').result
 
 
 if __name__ == '__main__':

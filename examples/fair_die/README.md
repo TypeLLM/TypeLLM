@@ -18,7 +18,7 @@ result = client.generate(
         "permutations": "auto",
         "return_probabilities": True,
     }},
-)
+).result
 print(result["roll"])
 ```
 

@@ -22,7 +22,7 @@ def cases():
         }, {'final': 17, 'root': 7, 'left': 8, 'noise': 'ISOLATED_BRANCH_SENTINEL', 'right': 9}),
         ('mixed_chain', {
             'number': {'type': 'integer', 'instructions': 'Return 7.', 'depends_on': []},
-            'text': {'type': 'string', 'maxLength': 8, 'instructions': 'Write the value of number as an English lowercase word, with no punctuation.', 'depends_on': ['number']},
+            'text': {'type': 'string', 'instructions': 'Write the value of number as an English lowercase word, with no punctuation.', 'depends_on': ['number']},
             'check': {'type': 'boolean', 'instructions': 'Is text exactly seven?', 'depends_on': ['text']},
         }, {'number': 7, 'text': 'seven', 'check': True}),
         ('enum24', {
@@ -37,8 +37,8 @@ def cases():
 
 
 def run(args, name, questions, expected, thinking):
-    client = TypeLLMClient(args.url, model=args.model,
-                           thinking_budget=args.thinking_budget, text_max_tokens=64)
+    client = TypeLLMClient(args.url, model=args.model, text_max_tokens=64)
+    client.sglang.thinking_budget = args.thinking_budget  # for every field that thinks
     requests = []
     original = client.sglang._request
 
@@ -58,9 +58,9 @@ def run(args, name, questions, expected, thinking):
     row = {'case': name, 'thinking': thinking}
     try:
         context = 'Follow the named dependency results carefully.\n' + ('Background: this is a deterministic dependency test.\n' * 100)
-        result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions)
+        result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions).result
         values = {k: v['value'] if isinstance(v, dict) else v for k, v in result.items()}
-        prompts = dict(zip(questions, client.last_prompts))
+        prompts = dict(zip(questions, client._last_prompts.get()))
         tokenizer = client.sglang._get_chat_tokenizer()
         edges = []
         for field, spec in questions.items():

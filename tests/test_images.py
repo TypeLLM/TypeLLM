@@ -181,7 +181,7 @@ class PlaceholderTests(unittest.TestCase):
         client.sglang = FakeServerClient(VisionTokenizer(renders_images=False))
         with self.assertRaisesRegex(SGLangError, "does not render image content"):
             client.generate(context="Receipt", images=[PNG],
-                            questions={"paid": {"type": "boolean", "instructions": "Paid?"}})
+                            questions={"paid": {"type": "boolean", "instructions": "Paid?"}}).result
         self.assertEqual(client.sglang.generate_payloads, [])
 
     def test_context_containing_image_tokens_is_rejected(self):
@@ -189,7 +189,7 @@ class PlaceholderTests(unittest.TestCase):
         client.sglang = FakeServerClient()
         with self.assertRaisesRegex(SGLangError, "2 image placeholders for 1 images"):
             client.generate(context=VISION, images=[PNG],
-                            questions={"paid": {"type": "boolean", "instructions": "Paid?"}})
+                            questions={"paid": {"type": "boolean", "instructions": "Paid?"}}).result
 
 
 class ImageRequestTests(unittest.TestCase):
@@ -201,7 +201,7 @@ class ImageRequestTests(unittest.TestCase):
     def run_generate(self, images, **kwargs):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
-        client.generate(context="Receipt", images=images, **kwargs)
+        client.generate(context="Receipt", images=images, **kwargs).result
         return client.sglang.generate_payloads
 
     def assert_images_attached(self, payloads, images):
@@ -242,15 +242,15 @@ class ImageRequestTests(unittest.TestCase):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
         client.generate(context="Receipt", images=[PNG],
-                        questions={"n": {"type": "integer", "instructions": "Count?"}})
+                        questions={"n": {"type": "integer", "instructions": "Count?"}}).result
         self.assert_images_attached(client.sglang.generate_payloads, [encode_image(PNG)])
 
     def test_images_are_scoped_to_one_call(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServerClient()
-        client.generate(context="Receipt", images=[PNG], questions=self.QUESTIONS)
+        client.generate(context="Receipt", images=[PNG], questions=self.QUESTIONS).result
         client.sglang.generate_payloads.clear()
-        client.generate(context="Receipt", questions=self.QUESTIONS)
+        client.generate(context="Receipt", questions=self.QUESTIONS).result
         self.assertTrue(all("image_data" not in p for p in client.sglang.generate_payloads))
 
     def test_thinking_budget_counts_image_tokens_on_the_server(self):
@@ -276,13 +276,13 @@ class ImageInputTokenTests(unittest.TestCase):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake-vl")
         client.sglang = FakeServerClient()
         questions = {"a": {"type": "boolean"}}
-        client.generate(context="Receipt", images=[PNG], questions=questions)
+        usage = client.generate(context="Receipt", images=[PNG], questions=questions).usage
         first = client.sglang.generate_payloads[0]["text"]
         first = first if isinstance(first, str) else first[0]
         count = client.sglang.count_tokens
         # The server reported 900 prompt tokens, with the placeholder expanded.
         image = 900 - count(first) + count(VISION)
-        self.assertEqual(client.last_usage.input_tokens,
+        self.assertEqual(usage.input_tokens,
                          count("Receipt") + count('{"a": {"type": "boolean"}}') + image)
 
 
@@ -305,7 +305,7 @@ class RuntimeContentTests(unittest.TestCase):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = Recording()
         client.generate(context="Receipt", images=[PNG, PNG],
-                        questions={"paid": {"type": "boolean", "instructions": "Paid?"}})
+                        questions={"paid": {"type": "boolean", "instructions": "Paid?"}}).result
         first = client.sglang.messages[0][0]["content"]
         self.assertEqual(first, [{"type": "image"}, {"type": "image"}, {"type": "text", "text": "Receipt"}])
         self.assertEqual(client.sglang.attached, (encode_image(PNG),) * 2)

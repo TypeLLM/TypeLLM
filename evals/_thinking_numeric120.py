@@ -48,7 +48,7 @@ def main():
             started=time.perf_counter();result=None;error=None;safe=None;correct=False
             schema=schema_for(case)
             try:
-                result=client.generate(context=case['context'],schema=schema)
+                result=client.generate(context=case['context'],schema=schema).result
                 safe=valid(result,schema)
                 correct=matches(result['answer'],case['expected'])
                 if 'followup' in case:

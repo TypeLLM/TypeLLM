@@ -20,7 +20,7 @@ def cases():
         ('negative', 'The temperature is -7 degrees.', {'answer': {'type': 'integer', 'instructions': 'Extract the temperature.'}}, {'answer': -7}),
         ('number', 'The price is 12.5 dollars.', {'answer': {'type': 'number', 'instructions': 'Extract the price.'}}, {'answer': 12.5}),
         ('text', 'The access code is blue.', {'answer': {'type': 'string', 'instructions': 'Return only the access code.'}}, {'answer': 'blue'}),
-        ('bounded_text', 'The access code is blue.', {'answer': {'type': 'string', 'maxLength': 4, 'instructions': 'Return only the access code.'}}, {'answer': 'blue'}),
+        ('bounded_text', 'The access code is blue.', {'answer': {'type': 'string', 'instructions': 'Return only the access code.'}}, {'answer': 'blue'}),
         ('mixed', 'There are 3 red apples. They are fresh.', {
             'color': {'type': 'string', 'enum': ['red', 'blue'], 'instructions': 'What color are the apples?', 'return_probabilities': True},
             'count': {'type': 'integer', 'instructions': 'How many apples?'},
@@ -49,8 +49,6 @@ def validate(result, questions):
                  'boolean': type(value) is bool}[kind]
         if not valid or ('enum' in field and value not in field['enum']):
             return False
-        if 'maxLength' in field and len(value) > field['maxLength']:
-            return False
     return True
 
 
@@ -73,8 +71,8 @@ def main():
     def run_one(case, thinking):
         name, context, questions, expected = case
         client = TypeLLMClient(args.url, model=args.model, tokenizer=args.model,
-            thinking_budget=args.thinking_budget, text_max_tokens=128,
-            timeout=180, seed=42)
+            text_max_tokens=128, timeout=180, seed=42)
+        client.sglang.thinking_budget = args.thinking_budget  # for every field that thinks
         client.sglang._chat_tokenizer = tokenizer
         client.sglang._numeric_tokens = numeric
         row = dict(model=args.model, thinking=thinking, thinking_budget=args.thinking_budget,
@@ -93,7 +91,7 @@ def main():
         client.sglang._request = record_request
         start = time.monotonic()
         try:
-            result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions)
+            result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions).result
             values = {k: v['value'] if questions[k].get('return_probabilities') else v for k, v in result.items()}
             row.update(result=result, type_valid=validate(result, questions), correct=values == expected)
         except Exception as exc:

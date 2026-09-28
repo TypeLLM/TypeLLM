@@ -24,10 +24,7 @@ class Decision:
     choices: tuple[Any, ...]
     syntax: str = "Choice"
     numeric_type: str | None = None
-    minimum: int | float | None = None
-    maximum: int | float | None = None
     text_type: bool = False
-    max_length: int | None = None
     permutations: int | str = 1
     return_probabilities: bool = False
     depends_on: tuple[str, ...] | None = None
@@ -91,6 +88,10 @@ def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision]:
         for old_key in ("question", "x-question"):
             if old_key in field:
                 raise SchemaError(f"{old_key} for {name!r} is no longer supported; use instructions")
+        # Decoding cannot hold a model to a range, so numeric bounds are not offered.
+        for keyword in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
+            if keyword in field:
+                raise SchemaError(f"{keyword} is not supported (on {name!r}); use an enum for a fixed set of values")
         description = field.get("description")
         if "description" in field and not isinstance(description, str):
             raise SchemaError(f"description for {name!r} must be a string")
@@ -135,15 +136,16 @@ def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision]:
             raise SchemaError(
                 f"x-other for {name!r} is not supported; use a closed enum"
             )
-        max_length = field.get("maxLength")
-        if "maxLength" in field and (type(max_length) is not int or max_length < 0):
-            raise SchemaError(f"maxLength for {name!r} must be a non-negative integer")
+        # Checking a length means decoding every token back to text, which slows every
+        # string; answers stop at the client's text_max_tokens instead.
+        if "maxLength" in field:
+            raise SchemaError(f"maxLength is not supported (on {name!r}); string answers stop at "
+                              "text_max_tokens, so ask for the length you want in instructions")
         if field_type == "string" and enum is None:
             for keyword in ("minLength", "pattern", "format"):
                 if keyword in field:
                     raise SchemaError(f"{keyword} is not supported for text fields")
-            decisions.append(Decision(name, question, (), "Text", text_type=True,
-                                      max_length=max_length, nullable=nullable))
+            decisions.append(Decision(name, question, (), "Text", text_type=True, nullable=nullable))
             continue
         if field_type == "boolean":
             values = ([True, False] + [None] * nullable) if enum is None else enum
@@ -153,17 +155,6 @@ def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision]:
                 raise SchemaError(f"boolean enum for {name!r} may contain only booleans")
             syntax = "Bool"
         elif field_type in {"integer", "number"} and enum is None:
-            minimum = field.get("minimum")
-            maximum = field.get("maximum")
-            for keyword, bound in (("minimum", minimum), ("maximum", maximum)):
-                if bound is not None and not _is_finite_number(bound):
-                    raise SchemaError(
-                        f"{keyword} for {name!r} must be a finite number"
-                    )
-            if minimum is not None and maximum is not None and minimum > maximum:
-                raise SchemaError(
-                    f"minimum for {name!r} must not exceed maximum"
-                )
             decisions.append(
                 Decision(
                     name=name,
@@ -171,8 +162,6 @@ def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision]:
                     choices=(),
                     syntax="Integer" if field_type == "integer" else "Number",
                     numeric_type=field_type,
-                    minimum=minimum,
-                    maximum=maximum,
                     nullable=nullable,
                 )
             )
@@ -202,8 +191,6 @@ def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision]:
                 raise SchemaError(
                     f"enum values for {name!r} do not match type {field_type!r}"
                 )
-            if field_type == "string" and max_length is not None and any(len(v) > max_length for v in typed):
-                raise SchemaError(f"enum values for {name!r} exceed maxLength")
             syntax = "Choice"
         else:
             raise NotImplementedError(

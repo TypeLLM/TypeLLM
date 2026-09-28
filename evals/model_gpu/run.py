@@ -27,7 +27,7 @@ def dag_cases():
         }, {'final': 17, 'root': 7, 'left': 8, 'noise': 'UNRELATED_SENTINEL', 'right': 9}),
         ('dag_mixed', 'Follow the instructions.', {
             'number': {'type': 'integer', 'instructions': 'Return 7.', 'depends_on': []},
-            'text': {'type': 'string', 'maxLength': 8, 'instructions': 'Write number as one lowercase English word.', 'depends_on': ['number']},
+            'text': {'type': 'string', 'instructions': 'Write number as one lowercase English word.', 'depends_on': ['number']},
             'check': {'type': 'boolean', 'instructions': 'Is text exactly seven?', 'depends_on': ['text']},
         }, {'number': 7, 'text': 'seven', 'check': True}),
         ('dag_enum24', 'Follow the instructions.', {
@@ -57,8 +57,8 @@ def main():
         for thinking in ([False] if 'Ling-mini' in args.model else [False, True]):
             for name, context, questions, expected in [*small.cases(), *dag_cases()]:
                 client = TypeLLMClient(args.url, model=args.model, tokenizer=args.model,
-                    thinking_budget=args.thinking_budget, text_max_tokens=128,
-                    timeout=180, seed=42)
+                    text_max_tokens=128, timeout=180, seed=42)
+                client.sglang.thinking_budget = args.thinking_budget  # for every field that thinks
                 client.sglang._chat_tokenizer = tokenizer
                 client.sglang._numeric_tokens = numeric
                 original = client.sglang._request
@@ -74,9 +74,9 @@ def main():
                 row = {'model': args.model, 'case': name, 'thinking': thinking}
                 start = time.monotonic()
                 try:
-                    result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions)
+                    result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()} if thinking else questions).result
                     values = {k: v['value'] if questions[k].get('return_probabilities') else v for k,v in result.items()}
-                    prompts = dict(zip(questions, client.last_prompts)) if name.startswith('dag_') else client.last_prompts
+                    prompts = dict(zip(questions, client._last_prompts.get())) if name.startswith('dag_') else client._last_prompts.get()
                     row.update(result=result, type_valid=small.validate(result, questions), correct=values == expected, prompts=prompts)
                     if name == 'dag_diamond':
                         row['isolation'] = all('UNRELATED_SENTINEL' not in prompts[k] for k in ('root','left','right','final'))

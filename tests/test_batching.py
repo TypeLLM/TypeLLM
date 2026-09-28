@@ -96,7 +96,7 @@ class PrefixWarmupTests(unittest.TestCase):
             with self.subTest(thinking=thinking):
                 client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
                 client.sglang = FakeServer()
-                client.generate(context="Receipt", questions=thinks(self.MIXED) if thinking else self.MIXED)
+                client.generate(context="Receipt", questions=thinks(self.MIXED) if thinking else self.MIXED).result
                 warm = client.sglang.requests("count")
                 self.assertEqual(len(warm), 1)
                 # First, before the thinking, number, text and scoring batches.
@@ -107,7 +107,7 @@ class PrefixWarmupTests(unittest.TestCase):
     def test_open_fields_alone_are_not_warmed(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
-        client.generate(context="Receipt", questions={"a": {"type": "integer"}, "n": {"type": "string"}})
+        client.generate(context="Receipt", questions={"a": {"type": "integer"}, "n": {"type": "string"}}).result
         self.assertEqual(client.sglang.requests("count"), [])
 
 
@@ -123,7 +123,7 @@ class PerFieldThinkingTests(unittest.TestCase):
             "hard": {"type": "boolean", "instructions": "Hard?", "thinking": True},
             "easy": {"type": "boolean", "instructions": "Easy?"},
             "count": {"type": "integer"},
-        })
+        }).result
         self.assertEqual(result, {"hard": True, "easy": True, "count": 7})
         [prompt] = self.thinking_prompts(client.sglang)  # one batch, one prompt
         self.assertIn("Hard?", prompt)
@@ -139,7 +139,7 @@ class PerFieldThinkingTests(unittest.TestCase):
             "a": {"type": "boolean", "instructions": "A?", "thinking": True},
             "b": {"type": "boolean", "instructions": "B?", "thinking": True},
             "skip": {"type": "boolean", "instructions": "Skip?", "thinking": False},
-        })
+        }).result
         prompts = self.thinking_prompts(client.sglang)
         self.assertEqual(len(client.sglang.requests("think")), 1)
         self.assertEqual(len(prompts), 2)
@@ -153,7 +153,7 @@ class PerFieldThinkingTests(unittest.TestCase):
             "short": {"type": "boolean", "instructions": "Short?", "thinking": True, "thinking_budget": 100},
             "long": {"type": "boolean", "instructions": "Long?", "thinking": True, "thinking_budget": 300},
             "default": {"type": "boolean", "instructions": "Default?", "thinking": True},
-        })
+        }).result
         [request] = client.sglang.requests("think")
         budgets = {next(q for q in ("Short?", "Long?", "Default?") if q in t): params["max_new_tokens"]
                    for t, params in zip(request["text"], request["sampling_params"])}
@@ -172,16 +172,14 @@ class PerFieldThinkingTests(unittest.TestCase):
 
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = Metered()
-        client.generate(context="Receipt", questions={
+        done = client.generate(context="Receipt", questions={
             "hard": {"type": "boolean", "instructions": "Hard?", "thinking": True},
             "easy": {"type": "boolean", "instructions": "Easy?"},
         })
-        self.assertEqual(client.last_thinking, {"hard": "Reasoned."})
-        self.assertEqual(client.last_usage.thinking_tokens, 40)
-        self.assertGreater(client.last_usage.completion_tokens, 40)  # answers count too
-        with self.assertRaises(ValueError):
-            client.generate(questions={"x": {"type": "boolean"}})
-        self.assertEqual(client.last_thinking, {})
+        self.assertEqual(done.thinking, {"hard": "Reasoned."})
+        self.assertEqual(done.usage.thinking_tokens, 40)
+        self.assertGreater(done.usage.completion_tokens, 40)  # answers count too
+        self.assertEqual(client.generate(context="Receipt", questions={"x": {"type": "boolean"}}).thinking, {})
 
     def test_invalid_settings_are_schema_errors(self):
         from typellm import SchemaError
@@ -203,7 +201,7 @@ class BatchedThinkingTests(unittest.TestCase):
     def test_one_thinking_request_covers_every_prompt_in_a_layer(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
-        result = client.generate(context="Receipt", questions=thinks(self.QUESTIONS))
+        result = client.generate(context="Receipt", questions=thinks(self.QUESTIONS)).result
         self.assertEqual(result, {"flag": True, "count": 7, "name": "blue", "pick": "x"})
         [think] = client.sglang.requests("think")
         # Four fields plus the reversed ordering of "pick".
@@ -220,14 +218,14 @@ class BatchedThinkingTests(unittest.TestCase):
             "a": {"type": "boolean"}, "b": {"type": "integer"},
             "c": {"type": "boolean", "depends_on": ["a", "b"]},
             "d": {"type": "string", "depends_on": ["a"]},
-        }))
+        })).result
         self.assertEqual([width(p) for p in client.sglang.requests("think")], [2, 2])
 
     def test_images_count_prompt_tokens_in_one_batch(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeServer()
         client.generate(context="Receipt", images=[PNG],
-                        questions=thinks({"a": {"type": "boolean"}, "b": {"type": "boolean"}}))
+                        questions=thinks({"a": {"type": "boolean"}, "b": {"type": "boolean"}})).result
         counts = [p for p in client.sglang.requests("count") if width(p) > 1]
         self.assertEqual([width(p) for p in counts], [2])
         [think] = client.sglang.requests("think")

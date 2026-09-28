@@ -21,7 +21,7 @@ class PermutationTests(unittest.TestCase):
         }
         if dependent:
             fields['flag']['depends_on'] = ['roll']
-        return client, client.generate(context='test', questions=fields)
+        return client, client.generate(context='test', questions=fields).result
 
     def test_position_bias_cancels_and_non_enum_runs_once(self):
         for dependent in (False, True):
@@ -65,7 +65,7 @@ class PermutationTests(unittest.TestCase):
         with patch.object(client.sglang, 'single_token') as tokens:
             for field in invalid:
                 with self.subTest(field=field), self.assertRaises(SchemaError):
-                    client.generate(context='x', questions={'x': field})
+                    client.generate(context='x', questions={'x': field}).result
             tokens.assert_not_called()
 
     def test_plain_output_boolean_enum_and_clamped_budget(self):
@@ -74,7 +74,7 @@ class PermutationTests(unittest.TestCase):
         result = client.generate(context='x', questions={
             'x': {'type': 'boolean', 'enum': [False, True], 'permutations': 100},
             'y': {'type': 'string', 'enum': ['a'], 'permutations': 'all'},
-        })
+        }).result
         self.assertIsInstance(result['x'], bool)
         self.assertEqual(result['y'], 'a')
         self.assertEqual(len(client.sglang.batch_prompts[0]), 3)
@@ -89,7 +89,7 @@ class PermutationTests(unittest.TestCase):
         ], 0.0)):
             result = client.generate(context='x', questions={'x': {
                 'type': 'string', 'enum': ['a', 'b'], 'permutations': 'all',
-                'return_probabilities': True}})
+                'return_probabilities': True}}).result
         self.assertAlmostEqual(result['x']['probabilities']['a'], .6)
         self.assertAlmostEqual(result['x']['probabilities']['b'], .4)
         self.assertEqual(result['x']['value'], 'a')
@@ -121,7 +121,7 @@ class PermutationTests(unittest.TestCase):
                           side_effect=lambda prompts, ids: ([(biased, {}) for _ in prompts], 0.0)) as score:
             result = client.generate(context='x', questions={'x': {
                 'type': 'string', 'enum': ['w', 'x', 'y', 'z'], 'permutations': 'auto',
-                'return_probabilities': True}})
+                'return_probabilities': True}}).result
         self.assertEqual(len(score.call_args.args[0]), 4)
         for probability in result['x']['probabilities'].values():
             self.assertAlmostEqual(probability, 1 / 4)
@@ -132,7 +132,7 @@ class PermutationTests(unittest.TestCase):
             client = TypeLLMClient("http://127.0.0.1:30000")
             client.sglang = DependencyFake([66])
             outputs.append(client.generate(context='x', questions={'x': {
-                'type': 'string', 'enum': ['a', 'b'], 'return_probabilities': True, **setting}}))
+                'type': 'string', 'enum': ['a', 'b'], 'return_probabilities': True, **setting}}).result)
         self.assertEqual(*outputs)
 
 

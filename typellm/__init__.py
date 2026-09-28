@@ -7,6 +7,7 @@ stable for existing callers, and ``python -m typellm`` launches the demo.
 from .benchmark import benchmark_prefix_cache
 from .runtime import (
     Choice,
+    Generation,
     TypeLLMClient,
     candidate_softmax,
     run_schema,
@@ -30,6 +31,7 @@ from .cli import example_schema, main
 __all__ = [
     "Choice",
     "Decision",
+    "Generation",
     "GenerationCancelled",
     "GenerationTimeout",
     "MAX_ENUM_CHOICES",

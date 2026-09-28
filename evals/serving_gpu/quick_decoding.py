@@ -21,8 +21,8 @@ def client():
 
 def one(c, case):
     start = time.perf_counter()
-    result = c.generate(context=case["context"], schema=schema_for(case))
-    return result, time.perf_counter() - start, c.last_usage.requests
+    done = c.generate(context=case["context"], schema=schema_for(case))
+    return done.result, time.perf_counter() - start, done.usage.requests
 
 
 report = {}

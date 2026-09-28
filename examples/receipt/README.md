@@ -20,7 +20,7 @@ result = client.generate(
                              "instructions": "Discount as a percentage of the subtotal."},
         # ... see receipt.py for all 14 fields
     },
-)
+).result
 ```
 
 ## Result

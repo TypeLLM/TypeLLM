@@ -52,7 +52,7 @@ def main():
     start = time.monotonic()
     result = client.generate(context='Read the attached photo of a restaurant receipt.',
                              images=[HERE / 'receipt.jpg'],
-                             questions={k: {**v, 'thinking': args.thinking} for k, v in QUESTIONS.items()})
+                             questions={k: {**v, 'thinking': args.thinking} for k, v in QUESTIONS.items()}).result
     seconds = time.monotonic() - start
     checks = {name: result[name] == value for name, value in EXPECTED.items()}
     print(json.dumps(result, indent=2, ensure_ascii=False))

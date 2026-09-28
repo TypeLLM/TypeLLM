@@ -48,7 +48,7 @@ def main():
     ]:
         client = TypeLLMClient(args.url, model=args.model)
         values = client.generate(context='Read the attached receipt.', images=[image],
-                                 questions={k: {**v, 'thinking': args.thinking} for k, v in questions.items()})
+                                 questions={k: {**v, 'thinking': args.thinking} for k, v in questions.items()}).result
         ok = all(values[k] == EXPECTED[k] for k in values)
         passed &= ok
         rows.append({'fields': fields, 'values': values, 'passed': ok})

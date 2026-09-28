@@ -12,7 +12,6 @@ import warnings
 from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from decimal import Decimal
 from itertools import permutations as all_permutations
 from string import ascii_uppercase, digits
 from typing import Any, Mapping, Sequence
@@ -60,10 +59,7 @@ class Choice:
     name: str | None = None
     syntax: str = "Choice"
     numeric_type: str | None = None
-    minimum: int | float | None = None
-    maximum: int | float | None = None
     text_type: bool = False
-    max_length: int | None = None
     permutations: int | str = 1
     return_probabilities: bool = False
     depends_on: tuple[str, ...] | None = None
@@ -76,8 +72,6 @@ class Choice:
             raise ValueError("Choice.choices must not be empty")
         if self.text_type and (self.choices or self.numeric_type is not None):
             raise ValueError("Text choices cannot have enum values or a numeric type")
-        if self.max_length is not None and (type(self.max_length) is not int or self.max_length < 0):
-            raise ValueError("max_length must be a non-negative integer")
         if self.numeric_type not in {None, "integer", "number"}:
             raise ValueError("numeric_type must be None, 'integer', or 'number'")
         if self.numeric_type is not None and self.choices:
@@ -118,12 +112,9 @@ class Choice:
         # <number> reads as "a number is required" and pulls absent values to 0.
         or_null = " or null" if self.nullable else ""
         if self.text_type:
-            kind = f"string{or_null}" + ("" if self.max_length is None else f", at most {self.max_length} characters")
+            kind = f"string{or_null}"
         elif self.numeric_type is not None:
-            # Plain decimals: json.dumps writes 1e-05, which the answer line forbids.
-            bounds = [f"{word} {Decimal(json.dumps(value)):f}" for word, value in
-                      (("minimum", self.minimum), ("maximum", self.maximum)) if value is not None]
-            kind = ", ".join([self.numeric_type + or_null, *bounds])
+            kind = self.numeric_type + or_null
         else:
             kind = "boolean" if self.syntax == "Bool" else "choice"
         lines.append(f"Type: {kind}")
@@ -144,6 +135,16 @@ class Choice:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class Generation:
+    """What generate() returns, as the HTTP API does: the typed answers, the
+    reasoning of each field that thought, and the tokens of the call."""
+
+    result: dict[str, Any]
+    thinking: dict[str, str]
+    usage: Usage
+
+
 class TypeLLMClient:
     """Generate typed answers with local SGLang or the hosted API."""
 
@@ -162,7 +163,6 @@ class TypeLLMClient:
         label_pool: Sequence[str] | None = None,
         numeric_max_digits: int = 32,
         tokenizer: str | None = None,
-        thinking_budget: int | None = None,
         text_max_tokens: int = 128,
     ) -> None:
         """Run on your own SGLang server, by default http://127.0.0.1:30000,
@@ -171,10 +171,10 @@ class TypeLLMClient:
         With api_key, calls go to the hosted API instead, by default
         https://api.typellm.ai. It compiles and runs the schema itself. Model
         chooses one of its models; temperature, seed and timeout apply, while
-        tokenizer, thinking_budget, text_max_tokens, numeric_max_digits and
-        label_pool need your own server and raise ValueError. A hosted timeout
-        set here is the default for generate() calls; without one, the service
-        uses its own default.
+        tokenizer, text_max_tokens, numeric_max_digits and label_pool need your
+        own server and raise ValueError. A hosted timeout set here is the
+        default for generate() calls; without one, the service uses its own
+        default.
 
         Given neither api_key nor base_url, the TYPELLM_API_KEY environment
         variable is used as api_key unless it is blank. Whitespace around either
@@ -200,14 +200,12 @@ class TypeLLMClient:
                 model,
                 DEFAULT_SOCKET_TIMEOUT if timeout is None else timeout,
                 tokenizer=tokenizer,
-                thinking_budget=thinking_budget,
                 text_max_tokens=text_max_tokens,
                 answer_reserve_tokens=numeric_max_digits + 3,
             )
         else:
             local_only = [name for name, value, default in (
-                ("tokenizer", tokenizer, None), ("thinking_budget", thinking_budget, None),
-                ("text_max_tokens", text_max_tokens, 128),
+                ("tokenizer", tokenizer, None), ("text_max_tokens", text_max_tokens, 128),
                 ("numeric_max_digits", numeric_max_digits, 32),
                 ("label_pool", label_pool, None)) if value != default]
             if local_only:
@@ -225,48 +223,21 @@ class TypeLLMClient:
         self.label_pool = tuple(label_pool or self.DEFAULT_LABEL_POOL)
         self.numeric_max_digits = numeric_max_digits
         self.label_token_map: dict[str, int] = {}
-        # Per-thread/task, so concurrent generate() calls never see each other's prompts.
+        # The prompts of the last call, for tests; per thread or task, so concurrent
+        # generate() calls never see each other's. print_final_prompt shows them.
         self._last_prompts: ContextVar[list[str]] = ContextVar(
             f"typellm_last_prompts_{id(self)}", default=[]
-        )
-        self._last_usage: ContextVar[Usage | None] = ContextVar(
-            f"typellm_last_usage_{id(self)}", default=None
-        )
-        self._last_thinking: ContextVar[dict[str, str]] = ContextVar(
-            f"typellm_last_thinking_{id(self)}", default={}
         )
 
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         del state["_last_prompts"]
-        del state["_last_usage"]
-        del state["_last_thinking"]
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self._last_prompts = ContextVar(f"typellm_last_prompts_{id(self)}", default=[])
-        self._last_usage = ContextVar(f"typellm_last_usage_{id(self)}", default=None)
-        self._last_thinking = ContextVar(f"typellm_last_thinking_{id(self)}", default={})
 
-    @property
-    def last_prompts(self) -> list[str]:
-        """Final prompts of the last generate() call made in this thread or task."""
-        return self._last_prompts.get()
-
-    @property
-    def last_thinking(self) -> dict[str, str]:
-        """Reasoning of the fields that thought in the last call in this thread or task."""
-        return self._last_thinking.get()
-
-    @property
-    def last_usage(self) -> Usage | None:
-        """Requests and tokens of the last generate() call made in this thread or task.
-
-        Local calls set this even when they raise, so partial work is counted.
-        Hosted success responses set input_tokens and thinking_tokens.
-        """
-        return self._last_usage.get()
 
     def _control_labels(self, count: int) -> list[str]:
         labels: list[str] = []
@@ -309,10 +280,7 @@ class TypeLLMClient:
                     name=item.name,
                     syntax=item.syntax,
                     numeric_type=item.numeric_type,
-                    minimum=item.minimum,
-                    maximum=item.maximum,
                     text_type=item.text_type,
-                    max_length=item.max_length,
                     permutations=item.permutations,
                     return_probabilities=item.return_probabilities,
                     depends_on=item.depends_on,
@@ -414,8 +382,11 @@ class TypeLLMClient:
         timeout: float | None = None,
         cancel: threading.Event | None = None,
         print_final_prompt: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Generation:
         """Answer every field; fields run in parallel unless they declare depends_on.
+
+        Returns the typed answers in .result, with .thinking and .usage. When a
+        local call fails, the exception's .usage holds the tokens it spent.
 
         A seed fixes this call's own random choices and leaves the client's shared
         stream alone; without one, calls share that stream. The server's numerics
@@ -425,8 +396,6 @@ class TypeLLMClient:
         cancel stop the call before its next request to SGLang. Hosted mode
         sends timeout to the service and does not support cancel.
         """
-        self._last_usage.set(None)
-        self._last_thinking.set({})
         if (context is None) == (state is None):
             raise ValueError("provide exactly one of context or state")
         context = state if state is not None else context
@@ -473,11 +442,12 @@ class TypeLLMClient:
                         active_temperature, rng, self.numeric_max_digits,
                         image_count=len(encoded_images),
                     )
-            finally:
-                self._last_usage.set(scope.usage)
+            except BaseException as exc:
+                exc.usage = scope.usage  # partial work, for callers that bill it
+                raise
         self._last_prompts.set(prompts)
-        self._last_thinking.set({decision.name: row["thinking"] for decision, row in zip(decisions, rows)
-                                 if row.get("thinking")})
+        thinking = {decision.name: row["thinking"] for decision, row in zip(decisions, rows)
+                    if row.get("thinking")}
 
         output: dict[str, Any] = {}
         for decision, row in zip(decisions, rows):
@@ -497,11 +467,11 @@ class TypeLLMClient:
 
         if print_final_prompt:
             _print_final_prompts(prompts)
-        return output
+        return Generation(output, thinking, scope.usage)
 
     def _generate_hosted(self, context: str, questions: Mapping[str, Any], images: Sequence[str],
                          mode: str, temperature: float, seed: int | None,
-                         timeout: float | None) -> dict[str, Any]:
+                         timeout: float | None) -> Generation:
         """One POST /v1/generate. HTTP errors carry their status in SGLangError."""
         active_timeout = self.timeout if timeout is None else timeout
         if active_timeout is not None and (type(active_timeout) not in (int, float) or
@@ -548,9 +518,7 @@ class TypeLLMClient:
         except (ValueError, TypeError, KeyError) as exc:
             raise SGLangError("TypeLLM API returned an invalid response",
                               status=response.status_code) from exc
-        self._last_usage.set(Usage(input_tokens=input_tokens, thinking_tokens=thinking_tokens))
-        self._last_thinking.set(thinking)
-        return result
+        return Generation(result, thinking, Usage(input_tokens=input_tokens, thinking_tokens=thinking_tokens))
 
 
 def candidate_softmax(
@@ -629,16 +597,6 @@ def _parse_numeric_value(text: str, decision: Choice) -> int | float:
     )
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"Generated non-finite number for {decision.name!r}")
-    if decision.minimum is not None and value < decision.minimum:
-        raise ValueError(
-            f"Generated value {value} is below minimum {decision.minimum} "
-            f"for {decision.name!r}"
-        )
-    if decision.maximum is not None and value > decision.maximum:
-        raise ValueError(
-            f"Generated value {value} is above maximum {decision.maximum} "
-            f"for {decision.name!r}"
-        )
     return value
 
 
@@ -946,7 +904,6 @@ def _execute_batch_decisions(
             numeric_max_digits + 4,
             # From {"name": the model writes the string's first token, quote included.
             [prompt + decision.answer_prefill for _, decision, _, prompt in text_pending],
-            [decision.max_length for _, decision, _, _ in text_pending],
             temperature=0 if mode == "argmax" else temperature,
             number_seed=number_seed,
             text_seed=text_seed,
@@ -1067,10 +1024,9 @@ def run_schema(
     seed: int | None = None,
     numeric_max_digits: int = 32,
     tokenizer: str | None = None,
-    thinking_budget: int | None = None,
     text_max_tokens: int = 128,
     print_final_prompt: bool = False,
-) -> dict[str, Any]:
+) -> Generation:
     client = TypeLLMClient(
         base_url or os.environ.get("SGLANG_URL", "http://127.0.0.1:30000"),
         model or os.environ.get("SGLANG_MODEL"),
@@ -1079,7 +1035,6 @@ def run_schema(
         seed=seed,
         numeric_max_digits=numeric_max_digits,
         tokenizer=tokenizer,
-        thinking_budget=thinking_budget,
         text_max_tokens=text_max_tokens,
     )
     return client.generate(

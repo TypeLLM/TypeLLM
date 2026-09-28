@@ -152,7 +152,7 @@ def main():
                 result = None
                 error = None
                 try:
-                    result = c.generate(context=case['context'], schema=case['schema'])
+                    result = c.generate(context=case['context'], schema=case['schema']).result
                 except Exception as exc:
                     error = f'{type(exc).__name__}: {exc}'
                 row = {'id': case['id'], 'thinking': mode,

@@ -21,9 +21,9 @@ def main():
         for budget, selected in ((32, cases()), (None, [cases()[0]])):
             for name, context, questions, expected in selected:
                 client = TypeLLMClient('http://127.0.0.1:30000', model=args.model,
-                    tokenizer=args.model, thinking_budget=budget,
-                    text_max_tokens=128, timeout=300, seed=42)
+                    tokenizer=args.model, text_max_tokens=128, timeout=300, seed=42)
                 backend = client.sglang
+                backend.thinking_budget = budget  # for every field that thinks
                 backend._chat_tokenizer = tokenizer
                 backend._numeric_tokens = numeric
                 row = dict(model=args.model, case=name,
@@ -61,7 +61,7 @@ def main():
                 backend._complete_thinking = record_complete
                 started = time.monotonic()
                 try:
-                    result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()})
+                    result = client.generate(context=context, questions={k: {**v, 'thinking': True} for k, v in questions.items()}).result
                     values = {k: v['value'] if questions[k].get('return_probabilities') else v
                               for k, v in result.items()}
                     row.update(result=result, type_valid=validate(result, questions), correct=values == expected)

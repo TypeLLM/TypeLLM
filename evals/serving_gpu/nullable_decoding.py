@@ -62,10 +62,10 @@ def run():
     for context, fields in CASES:
         questions = {name: spec for name, (spec, _) in fields.items()}
         start = time.perf_counter()
-        batch = c.generate(context=context, questions=questions)
-        batch_s, batch_requests = time.perf_counter() - start, c.last_usage.requests
+        done = c.generate(context=context, questions=questions)
+        batch, batch_s, batch_requests = done.result, time.perf_counter() - start, done.usage.requests
         for name, (spec, expected) in fields.items():
-            single = c.generate(context=context, questions={name: spec})[name]
+            single = c.generate(context=context, questions={name: spec}).result[name]
             rows.append({"field": name, "expected": expected, "batch": batch[name], "single": single,
                          "batch_ok": batch[name] == expected, "single_ok": single == expected})
         rows[-1]["batch_s"], rows[-1]["batch_requests"] = batch_s, batch_requests

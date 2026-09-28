@@ -19,7 +19,7 @@ class FieldProbabilityTests(unittest.TestCase):
                         'choice': {'type': field_type, 'enum': candidates, 'return_probabilities': True},
                         'flag': {'type': 'boolean', 'return_probabilities': True},
                         'plain': {'type': 'boolean', 'return_probabilities': False},
-                    })
+                    }).result
                 self.assertEqual(result['choice']['value'], candidates[1])
                 self.assertEqual(set(result['choice']['probabilities']), set(candidates))
                 self.assertAlmostEqual(sum(result['choice']['probabilities'].values()), 1)
@@ -40,7 +40,7 @@ class FieldProbabilityTests(unittest.TestCase):
         with patch.object(client.sglang, 'single_token') as tokens:
             for field in fields:
                 with self.subTest(field=field), self.assertRaises(SchemaError):
-                    client.generate(context='x', questions={'invalid': field})
+                    client.generate(context='x', questions={'invalid': field}).result
             tokens.assert_not_called()
 
     def test_default_is_plain(self):

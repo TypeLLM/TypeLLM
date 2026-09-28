@@ -53,6 +53,13 @@ class Usage:
     thinking_tokens: int = 0
     input_tokens: int = 0
 
+    def __repr__(self) -> str:
+        # What is billed first, as the HTTP API reports it; SGLang's counts when there are any.
+        billed = [("input_tokens", self.input_tokens), ("thinking_tokens", self.thinking_tokens)]
+        served = [(name, getattr(self, name)) for name in ("requests", "prompt_tokens", "cached_tokens",
+                                                           "completion_tokens") if getattr(self, name)]
+        return "Usage(" + ", ".join(f"{name}={value}" for name, value in billed + served) + ")"
+
     def _add(self, response: Any) -> None:
         self.requests += 1
         for item in response if isinstance(response, list) else [response]:
@@ -146,17 +153,6 @@ def _closed_json_string(text: str) -> str:
     if not text.endswith('"}'):
         raise ValueError(text)
     return json.loads('"' + text[:-1])
-
-
-def _partial_json_string(text: str) -> str:
-    """Decode a string cut off before its closing quote, dropping a split escape."""
-    text = _after_open_quote(text)
-    for cut in range(min(len(text), 6) + 1):
-        try:
-            return json.loads('"' + text[:len(text) - cut] + '"')
-        except ValueError:
-            continue
-    raise ValueError(text)
 
 
 
@@ -433,19 +429,21 @@ class SGLangClient:
             "pass model=... or set SGLANG_MODEL"
         )
 
-    def _tokenizer_source(self) -> str:
+    def _tokenizer_sources(self) -> list[str]:
+        """Where the chat tokenizer may load from, best first.
+
+        SGLang reports its own paths, which may exist only on its machine; its
+        served model name, often a Hugging Face ID, is tried after them.
+        """
         if self.tokenizer:
-            return self.tokenizer
+            return [self.tokenizer]
         info = self._model_info()
-        for key in ("tokenizer_path", "model_path"):
-            value = info.get(key)
-            if isinstance(value, str) and value:
-                return value
-        if self.model:
-            return self.model
-        raise SGLangError(
-            "Could not discover the tokenizer used by SGLang; pass tokenizer=..."
-        )
+        sources = [info.get(key) if isinstance(info, Mapping) else None
+                   for key in ("tokenizer_path", "model_path", "served_model_name")] + [self.model]
+        sources = list(dict.fromkeys(value for value in sources if isinstance(value, str) and value))
+        if not sources:
+            raise SGLangError("Could not discover the tokenizer used by SGLang; pass tokenizer=...")
+        return sources
 
     def _get_chat_tokenizer(self) -> Any:
         with self._load_lock:
@@ -460,16 +458,19 @@ class SGLangClient:
                     "Chat-template rendering requires transformers; install it "
                     "with `pip install transformers`"
                 ) from exc
-            source = self._tokenizer_source()
-            try:
-                self._chat_tokenizer = AutoTokenizer.from_pretrained(
-                    source, trust_remote_code=False,
-                )
-            except Exception as exc:
+            sources = self._tokenizer_sources()
+            failure: Exception | None = None
+            for source in sources:
+                try:
+                    self._chat_tokenizer = AutoTokenizer.from_pretrained(source, trust_remote_code=False)
+                    break
+                except Exception as exc:
+                    failure = exc
+            else:
                 raise SGLangError(
-                    "Could not load the tokenizer chat template. Pass the model's "
-                    "local tokenizer path or Hugging Face ID as tokenizer=..."
-                ) from exc
+                    f"Could not load the tokenizer chat template from {', '.join(map(repr, sources))}. "
+                    "Pass the model's local tokenizer path or Hugging Face ID as tokenizer=..."
+                ) from failure
         return self._chat_tokenizer
 
     def render_chat(
@@ -874,39 +875,29 @@ class SGLangClient:
             texts.append(text)
         return texts
 
-    def _text_params(self, max_lengths: Sequence[int | None], nullable: Sequence[bool],
-                     after_key: bool, temperature: float, seed: int) -> list[dict]:
+    def _text_params(self, nullable: Sequence[bool], after_key: bool, temperature: float,
+                     seed: int) -> list[dict]:
         if any(nullable) and not after_key:
             raise ValueError("nullable text needs the prefilled '{\"name\":' prompt")
         params = []
-        for limit, can_be_null in zip(max_lengths, nullable):
-            budget = self.text_max_tokens
+        for can_be_null in nullable:
             if after_key:
                 # End with the object's closing brace too: models close {"name": "text"}
-                # with the single token '"}', which a bare '"' would rule out. A
-                # length-bounded regex is several times slower, so the limit is
-                # applied by truncation below instead.
+                # with the single token '"}', which a bare '"' would rule out.
                 value = '"' + _JSON_STRING_CHAR + '*"'
                 # A nullable field may write null instead, in the same request.
                 value = f"(?:{value}|null)" if can_be_null else value
                 constraint = {"regex": " ?" + value + "\\}"}
-                if limit is not None:
-                    # Every token holds at least one character, besides the quotes.
-                    budget = min(budget, limit + 3)
             else:
-                schema: dict[str, Any] = {"type": "string"}
-                if limit is not None:
-                    schema["maxLength"] = limit
-                constraint = {"json_schema": json.dumps(schema)}
-            params.append({"max_new_tokens": budget,
+                constraint = {"json_schema": json.dumps({"type": "string"})}
+            params.append({"max_new_tokens": self.text_max_tokens,
                            "temperature": temperature, "sampling_seed": seed, **constraint})
         return params
 
     @staticmethod
-    def _read_texts(items: Sequence[Any], max_lengths: Sequence[int | None],
-                    nullable: Sequence[bool], after_key: bool) -> list[str | None]:
+    def _read_texts(items: Sequence[Any], nullable: Sequence[bool], after_key: bool) -> list[str | None]:
         values: list[str | None] = []
-        for item, limit, can_be_null in zip(items, max_lengths, nullable):
+        for item, can_be_null in zip(items, nullable):
             if not isinstance(item, Mapping):
                 raise SGLangError("Invalid text response")
             meta = item.get("meta_info", {})
@@ -917,35 +908,22 @@ class SGLangClient:
                     raise SGLangError(f"Text generation did not complete normally: {finish!r}")
                 values.append(None)
                 continue
-            # With a max length, running out of tokens mid-string is a truncation.
-            truncated = after_key and limit is not None and kind == "length"
-            if kind != "stop" and not truncated:
+            if kind != "stop":
                 raise SGLangError(f"Text generation did not complete normally: {finish!r}")
             try:
                 text = item["text"]
-                if after_key:
-                    value = _partial_json_string(text) if truncated else _closed_json_string(text)
-                else:
-                    value = json.loads(text)
+                value = _closed_json_string(text) if after_key else json.loads(text)
             except (KeyError, TypeError, ValueError) as exc:
                 raise SGLangError("Text generation returned an invalid JSON string") from exc
             if not isinstance(value, str):
                 raise SGLangError("Text generation returned a non-string value")
-            if after_key and limit is not None:
-                value = value[:limit]
-                if value and 0xD800 <= ord(value[-1]) <= 0xDBFF:
-                    value = value[:-1]  # never leave half of a surrogate pair
             if any(0xD800 <= ord(c) <= 0xDFFF for c in value):
                 raise SGLangError("Text generation returned an unpaired Unicode surrogate")
-            if limit is not None and len(value) > limit:
-                raise SGLangError("Text generation exceeded maxLength")
             values.append(value)
         return values
 
     @staticmethod
-    def _check_lengths(nullable, prefixes, max_lengths):
-        if len(prefixes) != len(max_lengths):
-            raise ValueError("prefixes and max_lengths must have the same length")
+    def _check_nullable(nullable, prefixes):
         nullable = [False] * len(prefixes) if nullable is None else list(nullable)
         if len(nullable) != len(prefixes):
             raise ValueError("prefixes and nullable must have the same length")
@@ -975,7 +953,6 @@ class SGLangClient:
     def generate_texts(
         self,
         prefixes: Sequence[str],
-        max_lengths: Sequence[int | None],
         *,
         temperature: float = 0,
         seed: int = 0,
@@ -987,15 +964,13 @@ class SGLangClient:
         With after_key, every prompt ends with '{"name":', and the model writes the
         opening quote, the characters and the closing '"}'. Writing the quote
         itself lets it start with a merged token such as ' "$', which keeps the
-        first character. A max length then truncates: generation is capped near
-        that many tokens and the string is cut to that many characters, as a
-        length-bounded grammar would.
+        first character. A string stops at text_max_tokens.
         """
-        nullable = self._check_lengths(nullable, prefixes, max_lengths)
+        nullable = self._check_nullable(nullable, prefixes)
         if not prefixes:
             return []
-        params = self._text_params(max_lengths, nullable, after_key, temperature, seed)
-        return self._read_texts(self._batch(prefixes, params, "text"), max_lengths, nullable, after_key)
+        params = self._text_params(nullable, after_key, temperature, seed)
+        return self._read_texts(self._batch(prefixes, params, "text"), nullable, after_key)
 
     def generate_fields(
         self,
@@ -1003,7 +978,6 @@ class SGLangClient:
         patterns: Sequence[str],
         number_max_tokens: int,
         text_prefixes: Sequence[str],
-        max_lengths: Sequence[int | None],
         *,
         temperature: float = 0,
         number_seed: int = 0,
@@ -1017,9 +991,9 @@ class SGLangClient:
         """
         if len(number_prefixes) != len(patterns):
             raise ValueError("prefixes and patterns must have the same length")
-        nullable = self._check_lengths(nullable, text_prefixes, max_lengths)
+        nullable = self._check_nullable(nullable, text_prefixes)
         params = (self._number_params(patterns, number_max_tokens, temperature, number_seed)
-                  + (self._text_params(max_lengths, nullable, after_key, temperature, text_seed)
+                  + (self._text_params(nullable, after_key, temperature, text_seed)
                      if text_prefixes else []))
         prefixes = list(number_prefixes) + list(text_prefixes)
         if not prefixes:
@@ -1027,7 +1001,7 @@ class SGLangClient:
         items = self._batch(prefixes, params, "field")
         split = len(number_prefixes)
         return (self._read_numbers(items[:split]),
-                self._read_texts(items[split:], max_lengths, nullable, after_key))
+                self._read_texts(items[split:], nullable, after_key))
 
     def flush_cache(self) -> None:
         reply = self._request("/flush_cache", {}, allow_text=True)

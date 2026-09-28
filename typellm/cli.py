@@ -84,7 +84,7 @@ def main() -> None:
         context=receipt,
         questions=schema["properties"],
         print_final_prompt=True,
-    )
+    ).result
     print("\n===== DECISIONS =====")
     print(json.dumps(results, indent=2, ensure_ascii=False))
 

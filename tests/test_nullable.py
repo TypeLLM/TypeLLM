@@ -51,16 +51,16 @@ class RuntimeTests(unittest.TestCase):
         client.sglang = NullServer()
         result = client.generate(context="Receipt", questions={
             "tip": {"type": ["number", "null"]}, "count": {"type": "integer"},
-        })
+        }).result
         self.assertEqual(result, {"tip": None, "count": 7})
-        self.assertIn("Return null only if there is no value.", client.last_prompts[0])
+        self.assertIn("Return null only if there is no value.", client._last_prompts.get()[0])
 
     def test_nullable_string_writes_null_in_its_text_request(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = NullServer()
         result = client.generate(context="Receipt", questions={
-            "note": {"type": ["string", "null"], "maxLength": 20}, "name": {"type": "string"},
-        })
+            "note": {"type": ["string", "null"]}, "name": {"type": "string"},
+        }).result
         self.assertEqual(result, {"note": None, "name": "blue"})
         self.assertEqual(client.sglang.requests("score"), [])  # no separate null step
         # One request for both strings, from '{"note":' and '{"name":'; only the nullable one may be null.
@@ -71,14 +71,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(text["text"][1].endswith('{"name":'))
         self.assertIn("null", text["sampling_params"][0]["regex"])
         self.assertNotIn("null", text["sampling_params"][1]["regex"])
-        self.assertIn('{"note": null}', client.last_prompts[0])
+        self.assertIn('{"note": null}', client._last_prompts.get()[0])
 
     def test_nullable_boolean_scores_null_as_a_choice(self):
         client = TypeLLMClient("http://127.0.0.1:30000", model="fake")
         client.sglang = FakeSGLang(selected_ids=[ord("C")])
         result = client.generate(context="Receipt", questions={
             "paid": {"type": ["boolean", "null"], "return_probabilities": True},
-        })
+        }).result
         self.assertIsNone(result["paid"]["value"])
         self.assertEqual(set(result["paid"]["probabilities"]), {True, False, None})
 
@@ -88,8 +88,8 @@ class RuntimeTests(unittest.TestCase):
         client.generate(context="Receipt", questions={
             "tip": {"type": ["number", "null"]},
             "tipped": {"type": "boolean", "depends_on": ["tip"]},
-        })
-        self.assertIn('{"tip": null}', client.last_prompts[1])
+        }).result
+        self.assertIn('{"tip": null}', client._last_prompts.get()[1])
 
 
 if __name__ == "__main__":

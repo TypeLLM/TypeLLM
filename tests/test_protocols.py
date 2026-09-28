@@ -57,6 +57,28 @@ class ProtocolTests(unittest.TestCase):
             self.assertIs(client._get_chat_tokenizer(), tokenizer)
         auto.from_pretrained.assert_called_once_with('/tokenizer', trust_remote_code=False)
 
+    def test_a_server_path_missing_here_falls_back_to_the_served_name(self):
+        tokenizer = ProtocolTokenizer('minicpm5')
+        auto = Mock()
+        auto.from_pretrained.side_effect = lambda source, **kwargs: (
+            tokenizer if source == 'org/model' else (_ for _ in ()).throw(OSError(source)))
+        client = SGLangClient()
+        client._model_info = Mock(return_value={'tokenizer_path': '/models/qwen', 'model_path': '/models/qwen',
+                                                'served_model_name': 'org/model'})
+        with patch.dict('sys.modules', {'transformers': SimpleNamespace(AutoTokenizer=auto)}):
+            self.assertIs(client._get_chat_tokenizer(), tokenizer)
+        self.assertEqual([call.args[0] for call in auto.from_pretrained.call_args_list], ['/models/qwen', 'org/model'])
+
+    def test_an_explicit_tokenizer_is_the_only_source_tried(self):
+        auto = Mock()
+        auto.from_pretrained.side_effect = OSError('missing')
+        client = SGLangClient(tokenizer='/nowhere')
+        client._model_info = Mock(return_value={'served_model_name': 'org/model'})
+        with patch.dict('sys.modules', {'transformers': SimpleNamespace(AutoTokenizer=auto)}), \
+                self.assertRaisesRegex(SGLangError, "'/nowhere'"):
+            client._get_chat_tokenizer()
+        auto.from_pretrained.assert_called_once()
+
     def test_gemma_is_rejected_before_inference(self):
         for thinking in (False, True):
             client = self.client('gemma')

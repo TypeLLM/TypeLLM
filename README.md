@@ -81,7 +81,7 @@ client = TypeLLMClient(
 Example request:
 
 ```python
-result = client.generate(
+response = client.generate(
     context="""
     Receipt from Hilton London
     Total: £324.50
@@ -113,10 +113,12 @@ result = client.generate(
     },
 )
 
-print(result)
+print(response.result)
 ```
 
-Example output:
+`generate()` returns what the HTTP API does: the typed answers in `.result`, the
+reasoning of each field that thought in `.thinking`, and the call's tokens in
+`.usage`. Example `.result`:
 
 ```python
 {
@@ -145,7 +147,7 @@ Enum choices support `string`, `integer`, and `number` types, with at most 24 va
 A string without `enum` generates free text:
 
 ```python
-result = client.generate(
+response = client.generate(
     context="The train ticket is for a client meeting.",
     questions={
         "summary": {"type": "string", "instructions": "Summarize in one sentence."},
@@ -154,12 +156,13 @@ result = client.generate(
 ```
 
 Free text stops after 128 tokens. Pass `text_max_tokens=` to the client for
-longer answers, or set `maxLength` on a field to cap its characters.
+longer answers, and ask for the length you want in the field's instructions.
+`maxLength` is not supported.
 
 Ask for a numeric answer without enumerating every possible value:
 
 ```python
-result = client.generate(
+response = client.generate(
     context="Calculate the requested value accurately.",
     questions={
         "answer": {
@@ -169,7 +172,7 @@ result = client.generate(
     },
 )
 
-print(result)
+print(response.result)
 # {"answer": 70.0}
 ```
 
@@ -195,7 +198,7 @@ Add `"null"` to the type to allow a missing value. The field returns `None`
 when the input has no value for it:
 
 ```python
-result = client.generate(
+response = client.generate(
     context="Read the attached receipt.",
     images=["receipt.jpg"],
     questions={
@@ -221,7 +224,7 @@ Thinking is off by default. Turn it on for the fields that need it; the others
 answer at once, and the fields that think reason side by side:
 
 ```python
-result = client.generate(context=context, questions={
+response = client.generate(context=context, questions={
     "total": {"type": "number"},
     "category": {"type": "string", "enum": ["meal", "travel", "equipment"]},
     "policy_ok": {"type": "boolean", "instructions": "Does it meet the travel policy?",
@@ -229,13 +232,12 @@ result = client.generate(context=context, questions={
 })
 ```
 
-`thinking_budget` caps a field's reasoning; there is no budget by default.
-`TypeLLMClient(..., thinking_budget=2048)` sets one for every field that thinks
-without its own. When reasoning reaches the budget, TypeLLM closes it and moves
-on to the typed answer.
+`thinking_budget` caps a field's reasoning. Without one, a field may reason until
+the model's context is full. When reasoning reaches the budget, TypeLLM closes it
+and moves on to the typed answer.
 
-After a call, `client.last_thinking` maps each field that thought to its
-reasoning, and `client.last_usage.thinking_tokens` counts the reasoning tokens.
+`response.thinking` maps each field that thought to its reasoning, and
+`response.usage.thinking_tokens` counts the reasoning tokens.
 
 Models with always-on thinking reason on every field; `thinking_budget` applies
 to them too. See [Supported models](#supported-models).
@@ -246,7 +248,7 @@ Pass images with `images=` alongside the text context. The served model must be
 a vision-language model, such as `Qwen/Qwen3.8-27B`.
 
 ```python
-result = client.generate(
+response = client.generate(
     context="The customer says this receipt was charged twice.",
     images=["receipt.png"],
     questions={
@@ -266,7 +268,7 @@ Fields run together by default, and each sees only the original context.
 When a field needs earlier results, list them in `depends_on`:
 
 ```python
-result = client.generate(
+response = client.generate(
     context="The payments service is returning errors after a deployment.",
     questions={
         "system": {
@@ -304,7 +306,7 @@ step reuses its parent's cached prompt. Unknown names and cycles raise
 Set `return_probabilities` on individual enum or boolean fields:
 
 ```python
-result = client.generate(
+response = client.generate(
     context=context,
     questions={
         "expense_type": {
@@ -356,7 +358,7 @@ For a one-off request, use the convenience function:
 ```python
 from typellm import run_schema
 
-result = run_schema(
+response = run_schema(
     context=context,
     questions=questions,
     base_url="http://127.0.0.1:30000",
@@ -369,7 +371,7 @@ result = run_schema(
 Add `permutations` to an `enum` question to reduce option-order bias. TypeLLM averages the probabilities and keeps the same return format.
 
 ```python
-result = client.generate(
+response = client.generate(
     context="A single roll of a fair die.",
     questions={"roll": {
         "type": "string",
@@ -402,19 +404,19 @@ prompts and usage, and connections to SGLang are reused.
 import threading
 
 cancel = threading.Event()
-result = client.generate(
+response = client.generate(
     context=context,
     questions=questions,
     seed=7,          # this call's random choices only
     timeout=30,      # seconds for the whole call; raises GenerationTimeout
     cancel=cancel,   # set it from another thread; raises GenerationCancelled
 )
-print(client.last_usage)
-# Usage(requests=4, prompt_tokens=1830, cached_tokens=1504, completion_tokens=7, thinking_tokens=0, input_tokens=410)
+print(response.usage)
+# Usage(input_tokens=410, thinking_tokens=0, requests=4, prompt_tokens=1830, cached_tokens=1504, completion_tokens=7)
 ```
 
-`last_usage` reports the tokens of the last call made in the current thread,
-including a call that failed partway. `input_tokens` is what you sent, each part
+`usage` reports the tokens of the call. When a call fails partway, the
+exception's `.usage` holds what it spent. `input_tokens` is what you sent, each part
 counted once: the context, the questions as JSON, and the images. The other
 counts are SGLang's for the call's requests, where every prompt carries the
 shared context. A timeout or cancel stops
@@ -453,8 +455,9 @@ Other sizes in the Qwen3.5 and Qwen3.8 families are expected to be compatible.
 
 [Image input](#image-input) has been tested with `Qwen/Qwen3.8-27B`.
 
-Use the checkpoint ID as `model=`. If the server's tokenizer path is unavailable
-locally, set `tokenizer=` to its matching Hugging Face ID or local directory.
+Use the checkpoint ID as `model=`. TypeLLM loads the tokenizer from the server's
+paths, then its served model name; if none of those loads locally, set
+`tokenizer=` to the matching Hugging Face ID or local directory.
 The tokenizer must load from standard artifacts without custom model code.
 
 ## Comparison with Jev-style models

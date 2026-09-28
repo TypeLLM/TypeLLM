@@ -10,12 +10,12 @@ HERE = Path(__file__).resolve().parent
 DOLLARS = 'in US dollars as a plain number, e.g. 12.50'
 
 QUESTIONS = {
-    'store': {'type': 'string', 'maxLength': 40, 'instructions': 'Name of the restaurant.'},
-    'date': {'type': 'string', 'maxLength': 12, 'instructions': 'Date printed on the receipt, exactly as printed.'},
-    'first_item': {'type': 'string', 'maxLength': 40, 'instructions': 'Name of the first line item, without its quantity.'},
-    'second_item': {'type': 'string', 'maxLength': 40, 'instructions': 'Name of the second line item, without its quantity.'},
-    'third_item': {'type': 'string', 'maxLength': 40, 'instructions': 'Name of the third line item, without its quantity.'},
-    'table': {'type': 'string', 'maxLength': 8, 'instructions': 'Table number.'},
+    'store': {'type': 'string', 'instructions': 'Name of the restaurant.'},
+    'date': {'type': 'string', 'instructions': 'Date printed on the receipt, exactly as printed.'},
+    'first_item': {'type': 'string', 'instructions': 'Name of the first line item, without its quantity.'},
+    'second_item': {'type': 'string', 'instructions': 'Name of the second line item, without its quantity.'},
+    'third_item': {'type': 'string', 'instructions': 'Name of the third line item, without its quantity.'},
+    'table': {'type': 'string', 'instructions': 'Table number.'},
     'item_lines': {'type': 'integer', 'instructions': 'How many line items are listed?'},
     'guests': {'type': 'integer', 'instructions': 'Number of customers on the check.'},
     'subtotal': {'type': 'number', 'instructions': f'Subtotal {DOLLARS}.'},
@@ -28,7 +28,7 @@ QUESTIONS = {
                          'instructions': 'Sales tax as a percentage of the subtotal, rounded to two decimals.'},
     'per_person': {'type': 'number', 'depends_on': ['total', 'guests'],
                    'instructions': 'Total due per customer in US dollars, rounded to two decimals.'},
-    'expense_note': {'type': 'string', 'maxLength': 120,
+    'expense_note': {'type': 'string',
                      'depends_on': ['store', 'date', 'guests', 'total', 'tips_accepted'],
                      'instructions': 'One short sentence for an expense report describing this meal.'},
 }
@@ -56,7 +56,7 @@ def main():
     start = time.monotonic()
     result = client.generate(context='Read the attached photo of a restaurant receipt.',
                              images=[HERE / 'receipt.jpg'],
-                             questions={k: {**v, 'thinking': args.thinking} for k, v in QUESTIONS.items()})
+                             questions={k: {**v, 'thinking': args.thinking} for k, v in QUESTIONS.items()}).result
     seconds = time.monotonic() - start
     checks = {name: result[name] == value for name, value in EXPECTED.items()}
     print(json.dumps(result, indent=2, ensure_ascii=False))
