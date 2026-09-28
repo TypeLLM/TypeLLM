@@ -165,7 +165,8 @@ class TypeLLMClient:
         thinking_budget: int | None = None,
         text_max_tokens: int = 128,
     ) -> None:
-        """Run on your own SGLang server, by default http://127.0.0.1:30000.
+        """Run on your own SGLang server, by default http://127.0.0.1:30000,
+        unless TYPELLM_API_KEY is set (see below).
 
         With api_key, calls go to the hosted API instead, by default
         https://api.typellm.ai. It compiles and runs the schema itself. Model

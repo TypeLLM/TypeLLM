@@ -24,7 +24,7 @@ d=Choice(question='What is the invoice total?',choices={},name='total',syntax='N
 # Match the actual compiler's syntax instead of assuming it.
 from typellm import TypeLLMClient
 from _thinking_eval import cases
-base=TypeLLMClient(model='qwen3.8-27b',tokenizer='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead')
+base=TypeLLMClient('http://127.0.0.1:30000',model='qwen3.8-27b',tokenizer='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead')
 case=next(x for x in cases() if x['id']=='batch_mixed')
 d=base.compile_schema(case['schema'])[-1]
 messages=[{'role':'user','content':case['context']},{'role':'user','content':d.opening_text()}]

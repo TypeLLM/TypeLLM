@@ -31,7 +31,7 @@ def main():
         counts = Counter(c['category'] for c in cases)
         assert len(cases) == 8
     (out/'cases.jsonl').write_text(''.join(json.dumps(c)+'\n' for c in cases))
-    client = TypeLLMClient(model='qwen3.8-27b',tokenizer='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead',timeout=180)
+    client = TypeLLMClient('http://127.0.0.1:30000',model='qwen3.8-27b',tokenizer='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead',timeout=180)
     client.sglang = ThinkingClient(model='qwen3.8-27b',tokenizer='RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead',timeout=180)
     client.sglang.budget = 1024
     metadata = {'cases':len(cases), 'category_counts':dict(counts), 'thinking':True,
