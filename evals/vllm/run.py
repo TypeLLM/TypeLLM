@@ -2,7 +2,7 @@
 
 Example:
   python evals/vllm/run.py \\
-    --url http://192.168.140.40:8000/v1 \\
+    --url http://127.0.0.1:8000/v1 \\
     --model RedHatAI/Qwen3.8-27B-INT4 \\
     --tokenizer RedHatAI/Qwen3.8-27B-INT4 \\
     --output evals/vllm/results.json \\
@@ -1139,7 +1139,7 @@ def write_report(path: Path, payload: dict):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://192.168.140.40:8000/v1")
+    parser.add_argument("--url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", default="RedHatAI/Qwen3.8-27B-INT4")
     parser.add_argument("--tokenizer", default="RedHatAI/Qwen3.8-27B-INT4")
     parser.add_argument("--timeout", type=float, default=600)

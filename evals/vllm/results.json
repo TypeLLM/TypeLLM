@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-09-28T13:49:59Z",
-  "url": "http://192.168.140.40:8000/v1",
+  "url": "http://127.0.0.1:8000/v1",
   "model": "RedHatAI/Qwen3.8-27B-INT4",
   "tokenizer": "RedHatAI/Qwen3.8-27B-INT4",
   "vllm_version": "0.28.0",

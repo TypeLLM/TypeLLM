@@ -5,7 +5,7 @@ Generated: 2026-09-28T13:49:59Z
 ## Summary
 
 - Correctness: **14/14** cases passed
-- Server: `http://192.168.140.40:8000/v1`
+- Server: `http://127.0.0.1:8000/v1`
 - Model: `RedHatAI/Qwen3.8-27B-INT4`
 - vLLM version: `0.28.0`
 
