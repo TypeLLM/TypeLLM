@@ -527,14 +527,14 @@ class TypeLLMClient:
                               status=response.status_code) from exc
         self._last_usage.set(Usage(input_tokens=input_tokens, thinking_tokens=thinking_tokens))
         self._last_thinking.set(thinking)
-        # JSON keys are strings: key probabilities by each field's own values again, as
-        # locally. The service writes booleans as JSON does and other values as str() does.
-        # ponytail: so "None" and null in one enum share a key; typed keys need the service.
-        for decision in compile_json_schema({"type": "object", "properties": questions}):
-            answer = result.get(decision.name)
-            if decision.return_probabilities and isinstance(answer, dict):
+        # JSON keys are strings: key probabilities by each field's values again, as locally.
+        # The service writes booleans as JSON does and other values as str() does, so an
+        # enum holding both "None" and null gets one entry.
+        for name, question in questions.items():
+            answer = result.get(name)
+            if isinstance(answer, dict):  # a return_probabilities answer
                 values = {json.dumps(value) if type(value) is bool else str(value): value
-                          for value in decision.choices}
+                          for value in question.get("enum") or (True, False, None)}
                 answer["probabilities"] = {values.get(key, key): probability
                                            for key, probability in answer["probabilities"].items()}
         return result
