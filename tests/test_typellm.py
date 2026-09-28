@@ -945,6 +945,29 @@ class HostedApiTests(unittest.TestCase):
         self.assertEqual((client.last_usage.input_tokens, client.last_usage.thinking_tokens), (40, 9))
         self.assertEqual(client.last_thinking, {"total": "The receipt says 12.50."})
 
+    def test_hosted_probabilities_are_keyed_by_values_as_locally(self):
+        # The keys as the service writes them: booleans as JSON does, the rest as str() does.
+        client = self.client(lambda request: httpx.Response(200, json={
+            "result": {
+                "ok": {"value": None, "probabilities": {"true": 0.2, "false": 0.1, "None": 0.7}},
+                "score": {"value": 2.5, "probabilities": {"1": 0.4, "2.5": 0.6}},
+                "tone": {"value": "calm", "probabilities": {"calm": 0.9, "tense": 0.1}},
+            },
+            "usage": {"input_tokens": 1, "thinking_tokens": 0},
+        }))
+
+        result = client.generate(context="x", questions={
+            "ok": {"type": ["boolean", "null"], "return_probabilities": True},
+            "score": {"type": "number", "enum": [1, 2.5], "return_probabilities": True},
+            "tone": {"type": "string", "enum": ["calm", "tense"], "return_probabilities": True},
+        })
+
+        self.assertEqual(result, {
+            "ok": {"value": None, "probabilities": {True: 0.2, False: 0.1, None: 0.7}},
+            "score": {"value": 2.5, "probabilities": {1: 0.4, 2.5: 0.6}},
+            "tone": {"value": "calm", "probabilities": {"calm": 0.9, "tense": 0.1}},
+        })
+
     def test_hosted_temperature_only_applies_to_sampling(self):
         bodies = []
 
