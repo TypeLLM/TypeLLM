@@ -14,8 +14,32 @@
 </h4>
 </div>
 
+**① Plain blockquote**
+
+> **The TypeLLM API is live.** Typed outputs without serving a model yourself, and $5 of credit for new accounts. [Try it →](https://typellm.ai/dashboard/playground)
+
+**② `[!NOTE]` (blue)**
+
+> [!NOTE]
+> **The TypeLLM API is live.** Typed outputs without serving a model yourself, and $5 of credit for new accounts. [Try it →](https://typellm.ai/dashboard/playground)
+
+**③ `[!TIP]` (green)**
+
 > [!TIP]
 > **The TypeLLM API is live.** Typed outputs without serving a model yourself, and $5 of credit for new accounts. [Try it →](https://typellm.ai/dashboard/playground)
+
+**④ `[!IMPORTANT]` (purple)**
+
+> [!IMPORTANT]
+> **The TypeLLM API is live.** Typed outputs without serving a model yourself, and $5 of credit for new accounts. [Try it →](https://typellm.ai/dashboard/playground)
+
+**⑤ Centered line (would sit under the nav links)**
+
+<p align="center"><b>The TypeLLM API is live.</b> Typed outputs without serving a model yourself, and $5 of credit for new accounts. <a href="https://typellm.ai/dashboard/playground">Try it →</a></p>
+
+**⑥ Badge (would sit under the nav links)**
+
+<p align="center"><a href="https://typellm.ai/dashboard/playground"><img alt="TypeLLM API: live, $5 of credit for new accounts" src="https://img.shields.io/badge/TypeLLM_API-live_%C2%B7_%245_credit_for_new_accounts-2ea44f" /></a></p>
 
 ## Updates
 - **[2026/10/01]** Added [conditional fields](#conditional-fields): `when` runs a field only when its dependencies' answers pass tests such as `{"amount": {"gte": 1000}}`.
