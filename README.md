@@ -18,7 +18,6 @@
 > **The TypeLLM API is live.** Typed outputs without serving a model yourself, and $5 of credit for new accounts. [Try it →](https://typellm.ai/dashboard/playground)
 
 ## Updates
-- **[2026/10/03]** The [TypeLLM API](https://typellm.ai) is open to everyone, no access code needed.
 - **[2026/10/01]** Added [conditional fields](#conditional-fields): `when` runs a field only when its dependencies' answers pass tests such as `{"amount": {"gte": 1000}}`.
 - **[2026/10/01]** Added [thinking effort](#thinking-effort): set thinking by level, or let `"thinking": "auto"` choose it on each call.
 - **[2026/09/24]** Added [image input](#image-input) for vision-language models, tested with Qwen3.8-27B.
