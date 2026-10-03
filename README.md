@@ -15,7 +15,7 @@
 </div>
 
 ## Updates
-🚀 [TypeLLM API](https://typellm.ai) is live, with $5 free credit. [Try it](https://typellm.ai/dashboard/playground).
+🚀 [TypeLLM API](https://typellm.ai) is live, with $5 free credit. [Try it](https://typellm.ai/dashboard/playground) · [Quick start](#typellm-api-cloud) · [Examples](https://typellm.ai/examples).
 
 - **[2026/10/01]** Added [conditional fields](#conditional-fields): a field with `when` is answered only if its dependencies meet conditions.
 - **[2026/10/01]** Added [thinking effort](#thinking-effort): set thinking by level, or let `"thinking": "auto"` choose it on each call.
