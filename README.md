@@ -42,7 +42,7 @@
 <p align="center"><a href="https://typellm.ai/dashboard/playground"><img alt="TypeLLM API: live, $5 of credit for new accounts" src="https://img.shields.io/badge/TypeLLM_API-live_%C2%B7_%245_credit_for_new_accounts-2ea44f" /></a></p>
 
 ## Updates
-- **[2026/10/01]** Added [conditional fields](#conditional-fields): `when` runs a field only when its dependencies' answers pass a test.
+- **[2026/10/01]** Added [conditional fields](#conditional-fields): `when` skips a field unless its dependencies' answers pass a test.
 - **[2026/10/01]** Added [thinking effort](#thinking-effort): set thinking by level, or let `"thinking": "auto"` choose it on each call.
 - **[2026/09/24]** Added [image input](#image-input) for vision-language models, tested with Qwen3.8-27B.
 - **[2026/09/23]** Added [JevBench results](https://github.com/TypeLLM/TypeLLM/blob/main/evals/jevbench/README.md): TypeLLM scored 195/231 without thinking and 228/231 with thinking.
