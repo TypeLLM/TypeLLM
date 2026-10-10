@@ -619,7 +619,8 @@ response = client.generate(
   orderings: each option takes every position,
   and follows every other option, equally often. That is `K` orderings for `K`
   options (`2K` when `K` is odd), and the result does not depend on the order the
-  enum was written in.
+  enum was written in. Past 8 options, it evaluates 8 orderings, rotations spaced
+  evenly, so each option takes 8 positions spread from first to last.
 - `"all"` evaluates every ordering (up to 720).
 - An integer greater than 1 samples that many distinct orderings at random.
 

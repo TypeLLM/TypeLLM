@@ -105,6 +105,19 @@ class PermutationTests(unittest.TestCase):
                 self.assertEqual(len(pairs), n * (n - 1))
                 self.assertEqual(len(set(pairs.values())), 1)
 
+    def test_auto_takes_eight_rotations_past_eight_choices(self):
+        rng = random.Random(0)
+        letters = 'ABCDEFGHIJKLMNOPQRST'
+        orders = [order for _, order in _choice_orderings(Choice('q', dict(zip(letters, range(20))), permutations='auto'), rng)]
+        self.assertEqual(len(orders), 8)
+        for order in orders:  # each a rotation of the first
+            shift = order.index(orders[0][0])
+            self.assertEqual(order, orders[0][-shift:] + orders[0][:-shift] if shift else orders[0])
+        for value in range(20):  # every choice in eight different positions
+            self.assertEqual(len({order.index(value) for order in orders}), 8)
+        self.assertEqual(len(_choice_orderings(Choice('q', dict(zip('ABCDEFG', range(7))), permutations='auto'), rng)), 14)
+        self.assertEqual(len(_choice_orderings(Choice('q', dict(zip('ABCDEFGH', range(8))), permutations='auto'), rng)), 8)
+
     def test_auto_does_not_depend_on_the_enum_order(self):
         def value_orders(values):
             d = Choice('q', dict(zip('ABCDEF', values)), permutations='auto')
