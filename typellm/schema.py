@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import math
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
 
 MAX_ENUM_CHOICES = 26
+# A field's enum may be longer when the runtime scores choices by value (compile_json_schema's
+# max_choices); array items and score levels keep MAX_ENUM_CHOICES.
+_MAX_CHOICES: ContextVar[int] = ContextVar("max_choices", default=MAX_ENUM_CHOICES)
 MAX_PERMUTATIONS = 720
 
 
@@ -153,13 +157,23 @@ def _is_finite_number(value: Any) -> bool:
     return type(value) is int or (type(value) is float and math.isfinite(value))
 
 
-def compile_json_schema(schema: Mapping[str, Any]) -> list[Decision | ArrayField]:
+def compile_json_schema(schema: Mapping[str, Any], max_choices: int = MAX_ENUM_CHOICES) -> list[Decision | ArrayField]:
     """Compile an ordered JSON Schema object into TypeLLM decisions.
+
+    max_choices bounds a field's enum; array items and score levels take MAX_ENUM_CHOICES.
 
     A scalar field is one decision. An object is one decision per scalar property, named by its
     path ("person.age"), in declaration order. An array is an ArrayField whose items are compiled
     the same way, apart from the fields around it.
     """
+    token = _MAX_CHOICES.set(max(max_choices, MAX_ENUM_CHOICES))
+    try:
+        return _compile(schema)
+    finally:
+        _MAX_CHOICES.reset(token)
+
+
+def _compile(schema: Mapping[str, Any]) -> list[Decision | ArrayField]:
     if not isinstance(schema, Mapping):
         raise SchemaError("schema must be a mapping")
     if schema.get("type") != "object":
@@ -327,7 +341,8 @@ def _object_entries(path: tuple[str, ...], field: Mapping[str, Any], label: str,
             entries.extend(members)
             scope[name] = ("object", tuple(entry.decision.name for entry in members))
             continue
-        decision = _scalar(".".join(member_path), member_label, member)
+        decision = _scalar(".".join(member_path), member_label, member,
+                           MAX_ENUM_CHOICES if inside_array else None)
         entries.append(_Entry(replace(decision, path=member_path, shown_name=name, scope=header),
                               member, scope, outer=outer))
         scope[name] = ("scalar", decision.name)
@@ -369,7 +384,7 @@ def _array(name: str, field: Mapping[str, Any]) -> ArrayField:
         for key in ("depends_on", "when"):
             if key in items:
                 raise SchemaError(f"{key} is not supported on the items of {name!r}; set it on the array")
-        item = _scalar("item", label, items)
+        item = _scalar("item", label, items, MAX_ENUM_CHOICES)
         if item.return_probabilities or item.levels:
             key = "levels" if item.levels else "return_probabilities"
             raise SchemaError(f"{key} is not supported inside arrays (on {label!r})")
@@ -540,11 +555,13 @@ def _link(entries: Sequence[_Entry]) -> list[Decision]:
     return compiled
 
 
-def _scalar(name: str, label: str, field: Mapping[str, Any]) -> Decision:
+def _scalar(name: str, label: str, field: Mapping[str, Any], limit: int | None = None) -> Decision:
     """One scalar field's decision: a string, integer, number or boolean, open or from an enum.
 
-    name is the decision's; label names the field in errors (a property's path).
+    name is the decision's; label names the field in errors (a property's path). limit bounds an enum;
+    None takes compile_json_schema's max_choices.
     """
+    limit = _MAX_CHOICES.get() if limit is None else limit
     question = _question(label, field, f'Choose the value for "{label}".')
     # Decoding cannot hold a model to a range, so numeric bounds are not offered.
     for keyword in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
@@ -627,10 +644,10 @@ def _scalar(name: str, label: str, field: Mapping[str, Any]) -> Decision:
             )
         if not isinstance(enum, list) or not enum:
             raise SchemaError(f"enum for {label!r} must be a non-empty list")
-        if len(enum) > MAX_ENUM_CHOICES:
+        if len(enum) > limit:
             raise SchemaError(
                 f"enum for {label!r} has {len(enum)} values; "
-                f"the maximum is {MAX_ENUM_CHOICES}"
+                f"the maximum is {limit}"
             )
         values = enum
         # As in JSON Schema, null is allowed only when the enum lists it.
@@ -651,10 +668,10 @@ def _scalar(name: str, label: str, field: Mapping[str, Any]) -> Decision:
             f"property {label!r} has unsupported JSON Schema type {field_type!r}"
         )
 
-    if len(values) > MAX_ENUM_CHOICES:
+    if len(values) > limit:
         raise SchemaError(
             f"enum for {label!r} has {len(values)} values; "
-            f"the maximum is {MAX_ENUM_CHOICES}"
+            f"the maximum is {limit}"
         )
     # One value leaves nothing to choose.
     if len(values) < 2:

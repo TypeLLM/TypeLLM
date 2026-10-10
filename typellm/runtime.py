@@ -52,6 +52,16 @@ def _closed_label(decision: "Choice", label: str) -> str:
     return decision.label_prefill + label + '"}' if decision.label_prefill else label
 
 
+def _closed_value(decision: "Choice", value: Any) -> str:
+    """A choice answered by its value, as history keeps it, e.g. {"choice": "billing"}."""
+    return decision.label_prefill + " " + json.dumps(value, ensure_ascii=False) + "}"
+
+
+def _value_continuation(value: Any) -> str:
+    """What follows {"choice": for a value: the scorer scores these, one per choice."""
+    return " " + json.dumps(value, ensure_ascii=False) + "}"
+
+
 def _user_content(text: str, image_count: int) -> str | list[dict[str, str]]:
     """Put images ahead of the text in the first user turn."""
     if not image_count:
@@ -90,6 +100,9 @@ class Choice:
     descriptions: tuple[tuple[Any, str], ...] = ()
     # A score's levels, lowest first; its value is the weighted average of their indices.
     levels: tuple[str, ...] = ()
+    # More choices than labels: the prompt lists values, the answer writes one, and the client's
+    # choice scorer gives each its probability. choices is keyed "0", "1", ... in enum order.
+    by_value: bool = False
 
     def __post_init__(self) -> None:
         if not self.choices and self.numeric_type is None and not self.text_type:
@@ -100,7 +113,7 @@ class Choice:
             raise ValueError("numeric_type must be None, 'integer', or 'number'")
         if self.numeric_type is not None and self.choices:
             raise ValueError("Open numeric choices must be empty")
-        if len(self.choices) > MAX_ENUM_CHOICES:
+        if len(self.choices) > MAX_ENUM_CHOICES and not self.by_value:
             raise ValueError(
                 f"Choice has {len(self.choices)} values; "
                 f"the maximum is {MAX_ENUM_CHOICES}"
@@ -134,7 +147,8 @@ class Choice:
         a model writes the field's value, "C", which may be another choice's label."""
         if self.text_type or self.numeric_type is not None:
             return ""
-        return '{"label": "'
+        # Up to the colon: the value's tokens, from the space on, do not depend on the prompt.
+        return '{"choice":' if self.by_value else '{"label": "'
 
     def opening_text(self) -> str:
         """The field's prompt: the same Field / Type / Instructions / Answer lines for every type,
@@ -165,6 +179,14 @@ class Choice:
             if self.nullable:
                 answer += " Return null only if there is no value."
         else:
+            if self.by_value:
+                said = {_value_key(value): text for value, text in self.descriptions}
+                lines.append("Choices (value, description):" if self.descriptions else "Choices:")
+                lines += [json.dumps(value, ensure_ascii=False)
+                          + (f" ({said[_value_key(value)]})" if _value_key(value) in said else "")
+                          for value in self.choices.values()]
+                lines.append('Answer as {"choice": <value>}, with one of the values above as written.')
+                return "\n".join(lines)
             # Say which side is the label, and answer under "label", not the field's name: after
             # '{"type": "' a model writes the field's value, such as "C", which may be another choice's label.
             if self.descriptions:
@@ -325,6 +347,8 @@ class TypeLLMClient:
         self.rng = random.Random(seed)
         self.label_pool = tuple(label_pool or self.DEFAULT_LABEL_POOL)
         self.numeric_max_digits = numeric_max_digits
+        # A field's enum may hold more values than labels once a choice scorer is set.
+        self.max_choices = MAX_ENUM_CHOICES
         self.label_token_map: dict[str, int] = {}
         # The prompts of the last call, for tests; per thread or task, so concurrent
         # generate() calls never see each other's. print_final_prompt shows them.
@@ -359,6 +383,18 @@ class TypeLLMClient:
     def __exit__(self, *exc_info: Any) -> None:
         self.close()
 
+
+    def use_choice_scorer(self, scorer: Any) -> None:
+        """Let a field's enum hold more values than there are labels, up to scorer.max_choices.
+
+        Such a field lists its values and is answered by writing one. scorer.score(sglang, prompts,
+        continuations) gets, for each prompt, the text that follows it for each choice, and returns
+        each choice's probability, summing to 1 for each prompt.
+        """
+        if self.sglang is None:
+            raise ValueError("a choice scorer needs your own server")
+        self.sglang.choice_scorer = scorer
+        self.max_choices = max(int(scorer.max_choices), MAX_ENUM_CHOICES)
 
     def _control_labels(self, count: int) -> list[str]:
         labels: list[str] = []
@@ -395,18 +431,22 @@ class TypeLLMClient:
             raise SchemaError("the top-level schema type must be 'object'")
         properties = schema.get("properties")
         if isinstance(properties, Mapping):
-            decisions = compile_json_schema(schema)
+            decisions = compile_json_schema(schema, max_choices=self.max_choices)
             arrays = [item for item in decisions if isinstance(item, ArrayField)]
             scalars = [item for item in decisions if not isinstance(item, ArrayField)]
             scalars += [item for array in arrays for item in array.items + (array.open_items or ())]
             # An array's continue question is a boolean: two labels.
-            finite_sizes = [len(item.choices) for item in scalars if item.choices] + [2] * bool(arrays)
+            finite_sizes = ([len(item.choices) for item in scalars if 0 < len(item.choices) <= MAX_ENUM_CHOICES]
+                            + [2] * bool(arrays))
             labels = self._control_labels(max(finite_sizes)) if finite_sizes else []
 
             def bind(item):
+                by_value = len(item.choices) > MAX_ENUM_CHOICES
                 return Choice(
                     question=item.question,
-                    choices=dict(zip(labels, item.choices)),
+                    choices=({str(i): value for i, value in enumerate(item.choices)} if by_value
+                             else dict(zip(labels, item.choices))),
+                    by_value=by_value,
                     name=item.name,
                     syntax=item.syntax,
                     numeric_type=item.numeric_type,
@@ -930,6 +970,28 @@ def _balanced_orders(count: int) -> list[tuple[int, ...]]:
     return list(dict.fromkeys(rows))
 
 
+# A choice answered by value has too many values to balance positions: when it asks for more than
+# one order, it is scored in this many, the first sorted, the rest shuffled.
+MAX_VALUE_ORDERS = 3
+
+
+def _value_orderings(decision, rng):
+    """The orders a choice answered by value is listed in; choices keep their keys."""
+    values = list(decision.choices.values())
+    keys = list(decision.choices)
+    if decision.permutations == 1:
+        return [decision]
+    count = (MAX_VALUE_ORDERS if decision.permutations in ("all", "auto")
+             else min(decision.permutations, MAX_VALUE_ORDERS))
+    canonical = sorted(range(len(values)), key=lambda i: json.dumps(values[i]))
+    orders = [canonical]
+    while len(orders) < count:
+        order = list(canonical)
+        rng.shuffle(order)
+        orders.append(order)
+    return [replace(decision, choices={keys[i]: values[i] for i in order}, permutations=1) for order in orders]
+
+
 def _choice_orderings(decision, rng):
     """Rebind values to fixed control labels, sampling ranks without enumeration."""
     labels = list(decision.choices)
@@ -1362,6 +1424,7 @@ def _execute_batch_decisions(
         return len(raw_prompts) - 1
 
     decision_slots = {}
+    value_jobs = []  # (decision index, [(prompt slot, variant), ...]) for choices answered by value
     scoring_slots = []
     scoring_prefills = []
     for index, decision in enumerate(decisions):
@@ -1375,6 +1438,20 @@ def _execute_batch_decisions(
             continue
         if decision.numeric_type is not None:
             numeric_pending.append((index, decision, messages))
+            continue
+        if decision.by_value:
+            if getattr(client, "choice_scorer", None) is None:
+                raise SchemaError(f"{decision.name!r} has {len(decision.choices)} choices; "
+                                  f"the maximum is {MAX_ENUM_CHOICES}")
+            jobs = []
+            for variant in _value_orderings(decision, rng):
+                variant_content = question_content(variant)
+                jobs.append((decision_slots[index] if list(variant.choices) == list(decision.choices) else
+                             generation_prompt(parent, variant_content,
+                                               shared_messages + [{"role": "user", "content": variant_content}],
+                                               variant), variant))
+            value_jobs.append((index, jobs))
+            finite_indexes.append(index)
             continue
         label_tokens = {
             label: client.single_token(label) for label in decision.choices
@@ -1429,7 +1506,7 @@ def _execute_batch_decisions(
 
     # A layer's numbers and strings decode side by side in one request, and its choices are
     # scored in that same request when the client can: one round trip for the layer, not two.
-    merged = bool((numeric_pending or text_pending) and prompts
+    merged = bool((numeric_pending or text_pending) and scoring_prompts
                   and callable(getattr(client, "generate_and_score", None)))
     if numeric_pending or text_pending:
         number_items = [(prompt + decision.answer_prefill, decision)
@@ -1465,45 +1542,68 @@ def _execute_batch_decisions(
             completed = complete(prompt, messages, _closed_answer(decision, json.dumps(value, ensure_ascii=False)))
             open_results[index] = (open_row(decision, value), completed)
 
-    if prompts:
+    grouped_scores = []
+    if scoring_prompts:
         if not merged:
             scored, elapsed = client.score_candidates_batch(scoring_prompts, scoring_ids)
-        grouped_scores = []
         offset = 0
         for orders in ordering_groups:
             grouped_scores.append(scored[offset:offset + len(orders)])
             offset += len(orders)
-        scored = [group[0] for group in grouped_scores]
     else:
-        scored, elapsed = [], 0.0
+        elapsed = 0.0
+    probability_temperature = temperature if mode == "sample" else 1.0
+
+    # Choices answered by value: the scorer gives each value's probability after each order's
+    # prompt; a value's probability is its mean over the orders.
+    value_probabilities: dict[int, dict[str, float]] = {}
+    if value_jobs:
+        requests = [(index, variant, ready[slot] + variant.label_prefill)
+                    for index, jobs in value_jobs for slot, variant in jobs]
+        scored_values = client.choice_scorer.score(
+            client, [prompt for _, _, prompt in requests],
+            [[_value_continuation(value) for value in variant.choices.values()] for _, variant, _ in requests])
+        sums: dict[int, dict[str, list[float]]] = {}
+        for (index, variant, _), probabilities in zip(requests, scored_values):
+            per_key = sums.setdefault(index, {key: [] for key in decisions[index].choices})
+            for key, probability in zip(variant.choices, probabilities):
+                per_key[key].append(float(probability))
+        for index, per_key in sums.items():
+            means = {key: math.fsum(values) / len(values) for key, values in per_key.items()}
+            if probability_temperature != 1.0:
+                weights = {key: p ** (1 / probability_temperature) for key, p in means.items()}
+                total = math.fsum(weights.values())
+                means = {key: weight / total for key, weight in weights.items()}
+            value_probabilities[index] = means
 
     results: list[dict] = []
     completed_prompts: list[str] = []
-    for finite_index, (decision_index, label_tokens, (by_id, meta)) in enumerate(
-        zip(finite_indexes, label_tokens_by_decision, scored)
-    ):
-        index = decision_index
+    labelled = iter(zip(label_tokens_by_decision, grouped_scores, ordering_groups))
+    for finite_index, index in enumerate(finite_indexes):
         decision = decisions[index]
-        raw = {
-            label: by_id[token_id]
-            for label, (token_id, _) in label_tokens.items()
-        }
-        probability_temperature = temperature if mode == "sample" else 1.0
-        probabilities = _mean_order_probabilities(
-            grouped_scores[finite_index], ordering_groups[finite_index],
-            label_tokens, probability_temperature)
+        if decision.by_value:
+            label_tokens, raw, meta = None, None, {}
+            probabilities = value_probabilities[index]
+        else:
+            label_tokens, group, orders = next(labelled)
+            by_id, meta = group[0]
+            raw = {
+                label: by_id[token_id]
+                for label, (token_id, _) in label_tokens.items()
+            }
+            probabilities = _mean_order_probabilities(group, orders, label_tokens, probability_temperature)
         selected = (
             max(probabilities, key=probabilities.__getitem__)
             if mode == "argmax"
             else _sample(probabilities, rng)
         )
-        selected_text = label_tokens[selected][1]
         semantic_value = decision.choices[selected]
         completed_prompts.append(
             complete(
                 prompts[finite_index],
                 shared_messages + [{"role": "user", "content": question_content(decision)}],
-                _closed_label(decision, selected_text),
+                _closed_value(decision, semantic_value) if decision.by_value
+                else _closed_label(decision, label_tokens[selected][1]),
             )
         )
         LOG.info("batch_decision=%d raw_candidate_logprobs=%s", index, raw)
