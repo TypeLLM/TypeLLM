@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "typellm"
-version = "0.6.8"
+version = "0.6.9"
 description = "Type-Safe Decoding for Autoregressive LLMs"
 readme = "README.md"
 license = "Apache-2.0"
