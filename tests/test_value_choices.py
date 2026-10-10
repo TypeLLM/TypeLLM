@@ -56,10 +56,17 @@ class ValueChoiceTests(unittest.TestCase):
     def test_orders_are_averaged_and_capped(self):
         scorer = FakeScorer()
         client_with(scorer).generate(context="x", questions={"c": {
-            "type": "string", "enum": VALUES, "return_probabilities": True, "permutations": "auto"}})
+            "type": "string", "enum": VALUES, "return_probabilities": True, "permutations": 5}})
         [(prompts, continuations)] = scorer.calls
         self.assertEqual(len(prompts), 3)
         self.assertEqual(len({tuple(c) for c in continuations}), 3)
+
+    def test_auto_scores_one_order(self):
+        scorer = FakeScorer()
+        client_with(scorer).generate(context="x", questions={"c": {
+            "type": "string", "enum": VALUES, "return_probabilities": True}})
+        [(prompts, _)] = scorer.calls
+        self.assertEqual(len(prompts), 1)
 
     def test_a_short_enum_keeps_its_labels(self):
         scorer = FakeScorer()

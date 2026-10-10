@@ -970,8 +970,10 @@ def _balanced_orders(count: int) -> list[tuple[int, ...]]:
     return list(dict.fromkeys(rows))
 
 
-# A choice answered by value has too many values to balance positions: when it asks for more than
-# one order, it is scored in this many, the first sorted, the rest shuffled.
+# "auto" balances every order position for up to this many choices, and takes this many orders past it.
+MAX_AUTO_ORDERS = 8
+# A choice answered by value is scored in its enum's order under "auto", and in at most this many
+# orders when it asks for more: the first sorted, the rest shuffled.
 MAX_VALUE_ORDERS = 3
 
 
@@ -979,10 +981,9 @@ def _value_orderings(decision, rng):
     """The orders a choice answered by value is listed in; choices keep their keys."""
     values = list(decision.choices.values())
     keys = list(decision.choices)
-    if decision.permutations == 1:
+    if decision.permutations in (1, "auto"):
         return [decision]
-    count = (MAX_VALUE_ORDERS if decision.permutations in ("all", "auto")
-             else min(decision.permutations, MAX_VALUE_ORDERS))
+    count = MAX_VALUE_ORDERS if decision.permutations == "all" else min(decision.permutations, MAX_VALUE_ORDERS)
     canonical = sorted(range(len(values)), key=lambda i: json.dumps(values[i]))
     orders = [canonical]
     while len(orders) < count:
@@ -999,6 +1000,13 @@ def _choice_orderings(decision, rng):
     # Orders start from a canonical one, so the orders used do not depend on the order the enum
     # was written in.
     canonical = sorted(range(len(values)), key=lambda i: json.dumps(values[i]))
+    if decision.permutations == "auto" and len(values) > MAX_AUTO_ORDERS:
+        # Past MAX_AUTO_ORDERS choices, as many rotations, evenly spaced: each choice takes positions
+        # spread from the first to the last.
+        shifts = sorted({round(k * len(values) / MAX_AUTO_ORDERS) for k in range(MAX_AUTO_ORDERS)})
+        orders = [tuple(canonical[(i + shift) % len(values)] for i in range(len(values))) for shift in shifts]
+        return [(replace(decision, choices=dict(zip(labels, (values[i] for i in order))),
+                         permutations=1), order) for order in orders]
     if decision.permutations == "auto" and len(values) > 1:
         # Balance positions and neighbours.
         orders = [tuple(canonical[i] for i in row) for row in _balanced_orders(len(values))]
