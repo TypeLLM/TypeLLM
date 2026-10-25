@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import os
 import pickle
@@ -216,10 +217,17 @@ class ImageRequestTests(unittest.TestCase):
             else:
                 expected = [list(images)] * len(texts)
             self.assertEqual(payload["image_data"], expected)
+            if all(image.startswith("data:") for image in images):
+                hashes = [hashlib.sha256(image.encode()).hexdigest()[:16] for image in images]
+                expected_hashes = hashes if isinstance(payload["text"], str) else [hashes] * len(texts)
+                self.assertEqual(payload["mm_hashes"], expected_hashes)
+            else:
+                # A URL's content may change, so SGLang hashes the images itself.
+                self.assertNotIn("mm_hashes", payload)
             for text in texts:
                 self.assertEqual(text.count(VISION), len(images))
-                # Images come before the context text in the first user turn.
-                self.assertLess(text.index(VISION), text.index("Receipt"))
+                # The context text comes before the images in the first user turn.
+                self.assertLess(text.index("Receipt"), text.index(VISION))
 
     def test_every_batch_request_carries_the_images(self):
         images = [encode_image(PNG), "https://example.com/b.png"]
@@ -308,7 +316,7 @@ class RuntimeContentTests(unittest.TestCase):
         client.generate(context="Receipt", images=[PNG, PNG],
                         questions={"paid": {"type": "boolean", "instructions": "Paid?"}}).result
         first = client.sglang.messages[0][0]["content"]
-        self.assertEqual(first, [{"type": "image"}, {"type": "image"}, {"type": "text", "text": "Receipt"}])
+        self.assertEqual(first, [{"type": "text", "text": "Receipt"}, {"type": "image"}, {"type": "image"}])
         self.assertEqual(client.sglang.attached, (encode_image(PNG),) * 2)
 
 
