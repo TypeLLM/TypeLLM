@@ -114,10 +114,11 @@ def _value_continuation(value: Any) -> str:
 
 
 def _user_content(text: str, image_count: int) -> str | list[dict[str, str]]:
-    """Put images ahead of the text in the first user turn."""
+    """Put the text ahead of the images in the first user turn: calls that share their text's
+    beginning, such as one set of instructions over many pages, then share a cached prefix."""
     if not image_count:
         return text
-    return [{"type": "image"}] * image_count + [{"type": "text", "text": text}]
+    return [{"type": "text", "text": text}] + [{"type": "image"}] * image_count
 
 
 @dataclass(frozen=True)

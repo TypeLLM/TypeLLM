@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -84,6 +85,13 @@ def _count_thinking(response: Any) -> None:
         tokens = meta.get("completion_tokens") if isinstance(meta, Mapping) else None
         if type(tokens) is int:
             scope.usage.thinking_tokens += tokens
+
+
+def _image_hashes(images: Sequence[str]) -> tuple[str, ...]:
+    """Each image's SHA-256 (64 bits, hex), or none when an image is a URL, whose content may change."""
+    if not all(image.startswith("data:") for image in images):
+        return ()
+    return tuple(hashlib.sha256(image.encode()).hexdigest()[:16] for image in images)
 
 
 @dataclass
@@ -209,11 +217,15 @@ class SGLangClient:
         self._active_images: ContextVar[tuple[str, ...]] = ContextVar(
             f"typellm_images_{id(self)}", default=()
         )
+        self._active_image_hashes: ContextVar[tuple[str, ...]] = ContextVar(
+            f"typellm_image_hashes_{id(self)}", default=()
+        )
 
     def __getstate__(self) -> dict[str, Any]:
         # A ContextVar cannot be pickled; images belong to one call anyway.
         state = self.__dict__.copy()
         del state["_active_images"]
+        del state["_active_image_hashes"]
         del state["_load_lock"]
         state["_http_client"] = None  # Each copy opens its own connections.
         return state
@@ -221,6 +233,7 @@ class SGLangClient:
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         self._active_images = ContextVar(f"typellm_images_{id(self)}", default=())
+        self._active_image_hashes = ContextVar(f"typellm_image_hashes_{id(self)}", default=())
         self._load_lock = threading.RLock()
 
     def close(self) -> None:
@@ -332,10 +345,12 @@ class SGLangClient:
         if images:
             self.image_placeholder()  # Fail before any request if unsupported.
         token = self._active_images.set(images)
+        hashes = self._active_image_hashes.set(_image_hashes(images))
         try:
             yield
         finally:
             self._active_images.reset(token)
+            self._active_image_hashes.reset(hashes)
 
     def image_placeholder(self) -> str:
         """Return the text the chat template writes for one image."""
@@ -428,7 +443,13 @@ class SGLangClient:
         else:
             # A list is read as one entry per prompt.
             image_data = [list(images) for _ in prompts]
-        return {**payload, "image_data": image_data}
+        hashes = list(self._active_image_hashes.get())
+        if not hashes:
+            return {**payload, "image_data": image_data}
+        # The images' hashes, so SGLang's scheduler need not hash each image's
+        # pixels again for every request of the call.
+        mm_hashes = hashes if isinstance(text, str) else [hashes for _ in prompts]
+        return {**payload, "image_data": image_data, "mm_hashes": mm_hashes}
 
     def _tokenizer_model(self) -> str:
         if self.model:
